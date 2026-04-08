@@ -56,12 +56,28 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
-        // Setup BlackHole visual
+        // Set camera to fit the game field (YAML edits get overwritten by Unity Editor)
+        var cam = Camera.main;
+        if (cam)
+        {
+            cam.orthographicSize = 3.5f;
+            cam.backgroundColor = new Color(0.04f, 0.05f, 0.08f);
+        }
+
+        // Position shooter at bottom of camera view
+        if (shooter)
+        {
+            shooter.transform.position = new Vector3(0, -cam.orthographicSize + 0.7f, 0);
+        }
+
+        // Setup BlackHole visual (unlit shader so it's visible without 2D light)
         var bhSr = blackHole.GetComponent<SpriteRenderer>();
         if (bhSr)
         {
-            bhSr.color = new Color(0.06f, 0.06f, 0.1f, 1f);
+            bhSr.color = new Color(0.08f, 0.08f, 0.14f, 1f);
             bhSr.sortingOrder = -10;
+            var unlitShader = Shader.Find("Sprites/Default");
+            if (unlitShader != null) bhSr.material = new Material(unlitShader);
         }
 
         LoadLevel(0);
@@ -110,6 +126,29 @@ public class GameManager : MonoBehaviour
         {
             SpawnBall(pos, color);
         }
+
+        // === DEBUG: diagnose visibility ===
+        var cam = Camera.main;
+        Debug.Log($"[GravityMatch] === Level {index + 1}: {lv.name} ===");
+        Debug.Log($"[GravityMatch] Camera orthoSize={cam.orthographicSize} pos={cam.transform.position} bg={cam.backgroundColor}");
+        Debug.Log($"[GravityMatch] Visible range: X=[{-cam.orthographicSize * cam.aspect:F2}, {cam.orthographicSize * cam.aspect:F2}] Y=[{-cam.orthographicSize:F2}, {cam.orthographicSize:F2}]");
+        Debug.Log($"[GravityMatch] BlackHole pos={blackHole.position} scale={blackHole.localScale} BHRadius={BHRadius}");
+        var bhSr = blackHole.GetComponent<SpriteRenderer>();
+        if (bhSr) Debug.Log($"[GravityMatch] BlackHole SR enabled={bhSr.enabled} color={bhSr.color} material={bhSr.material.shader.name} sortOrder={bhSr.sortingOrder}");
+        Debug.Log($"[GravityMatch] Shooter pos={shooter.transform.position} scale={shooter.transform.localScale}");
+        Debug.Log($"[GravityMatch] Ball count={balls.Count} WorldScale={GameConstants.WorldScale} BallRadius={GameConstants.BallRadius}");
+        float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+        foreach (var b in balls)
+        {
+            Vector2 p = b.transform.position;
+            if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+            var bsr = b.GetComponent<SpriteRenderer>();
+            Debug.Log($"[GravityMatch]   Ball#{b.id} pos=({p.x:F3},{p.y:F3}) scale={b.transform.localScale} color={b.ballColor} shader={bsr?.material.shader.name} enabled={bsr?.enabled}");
+        }
+        Debug.Log($"[GravityMatch] Ball bounds: X=[{minX:F3}, {maxX:F3}] Y=[{minY:F3}, {maxY:F3}]");
+        Debug.Log($"[GravityMatch] ballPrefab scale={ballPrefab.transform.localScale} SR={ballPrefab.GetComponent<SpriteRenderer>()?.sprite?.name}");
+        // === END DEBUG ===
 
         // Startup validation: prevent 3+ same-color groups
         for (int v = 0; v < 50; v++)

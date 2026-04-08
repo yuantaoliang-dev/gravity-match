@@ -22,12 +22,15 @@ public class Shooter : MonoBehaviour
 
     void Start()
     {
+        var unlitShader = Shader.Find("Sprites/Default");
+
         // Shooter platform indicator (faint circle)
         var sr = GetComponent<SpriteRenderer>();
         if (sr)
         {
             sr.color = new Color(0.4f, 0.45f, 0.55f, 0.25f);
             sr.sortingOrder = -5;
+            if (unlitShader != null) sr.material = new Material(unlitShader);
         }
 
         // Setup ball color displays
@@ -37,12 +40,14 @@ public class Shooter : MonoBehaviour
             currentBallDisplay.transform.localPosition = new Vector3(0, 0.15f, 0);
             currentBallDisplay.transform.localScale = new Vector3(ballDiam, ballDiam, 1f);
             currentBallDisplay.sortingOrder = 5;
+            if (unlitShader != null) currentBallDisplay.material = new Material(unlitShader);
         }
         if (nextBallDisplay)
         {
             nextBallDisplay.transform.localPosition = new Vector3(0.5f, 0.15f, 0);
             nextBallDisplay.transform.localScale = new Vector3(ballDiam * 0.65f, ballDiam * 0.65f, 1f);
             nextBallDisplay.sortingOrder = 5;
+            if (unlitShader != null) nextBallDisplay.material = new Material(unlitShader);
         }
     }
 

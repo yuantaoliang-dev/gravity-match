@@ -18,6 +18,14 @@ public class Ball : MonoBehaviour
         this.ballColor = color;
         if (sr == null) sr = GetComponent<SpriteRenderer>();
         sr.color = color;
+
+        // Force correct visual scale (prefab scale may not match WorldScale)
+        float diam = GameConstants.BallRadius * 2f;
+        transform.localScale = new Vector3(diam, diam, 1f);
+
+        // Use unlit shader so balls are visible without 2D lighting
+        var unlitShader = Shader.Find("Sprites/Default");
+        if (unlitShader != null) sr.material = new Material(unlitShader);
     }
 
     public float DistTo(Ball other)
