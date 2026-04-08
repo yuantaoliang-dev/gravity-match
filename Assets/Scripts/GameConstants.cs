@@ -59,4 +59,12 @@ public static class GameConstants
     {
         return "#" + ColorUtility.ToHtmlStringRGB(c);
     }
+
+    /// <summary>Create an unlit sprite material (URP first, legacy fallback).</summary>
+    public static Material CreateUnlitSpriteMaterial()
+    {
+        var shader = Shader.Find("Universal Render Pipeline/2D/Sprite-Unlit-Default");
+        if (shader == null) shader = Shader.Find("Sprites/Default");
+        return shader != null ? new Material(shader) : null;
+    }
 }

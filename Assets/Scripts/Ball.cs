@@ -24,8 +24,8 @@ public class Ball : MonoBehaviour
         transform.localScale = new Vector3(diam, diam, 1f);
 
         // Use unlit shader so balls are visible without 2D lighting
-        var unlitShader = Shader.Find("Sprites/Default");
-        if (unlitShader != null) sr.material = new Material(unlitShader);
+        var mat = GameConstants.CreateUnlitSpriteMaterial();
+        if (mat != null) sr.material = mat;
     }
 
     public float DistTo(Ball other)
