@@ -56,11 +56,23 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
+        // Setup BlackHole visual
+        var bhSr = blackHole.GetComponent<SpriteRenderer>();
+        if (bhSr)
+        {
+            bhSr.color = new Color(0.06f, 0.06f, 0.1f, 1f);
+            bhSr.sortingOrder = -10;
+        }
+
         LoadLevel(0);
     }
 
     void Update()
     {
+        // Update BlackHole visual size
+        float bhDiam = BHRadius * 2f;
+        blackHole.localScale = new Vector3(bhDiam, bhDiam, 1f);
+
         if (state == GameState.Play)
         {
             ForceValidColors();

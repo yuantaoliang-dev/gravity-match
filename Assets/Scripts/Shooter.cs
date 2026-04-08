@@ -20,6 +20,32 @@ public class Shooter : MonoBehaviour
     private bool aiming;
     private Vector2 aimDir;
 
+    void Start()
+    {
+        // Shooter platform indicator (faint circle)
+        var sr = GetComponent<SpriteRenderer>();
+        if (sr)
+        {
+            sr.color = new Color(0.4f, 0.45f, 0.55f, 0.25f);
+            sr.sortingOrder = -5;
+        }
+
+        // Setup ball color displays
+        float ballDiam = GameConstants.BallRadius * 2f;
+        if (currentBallDisplay)
+        {
+            currentBallDisplay.transform.localPosition = new Vector3(0, 0.15f, 0);
+            currentBallDisplay.transform.localScale = new Vector3(ballDiam, ballDiam, 1f);
+            currentBallDisplay.sortingOrder = 5;
+        }
+        if (nextBallDisplay)
+        {
+            nextBallDisplay.transform.localPosition = new Vector3(0.5f, 0.15f, 0);
+            nextBallDisplay.transform.localScale = new Vector3(ballDiam * 0.65f, ballDiam * 0.65f, 1f);
+            nextBallDisplay.sortingOrder = 5;
+        }
+    }
+
     void Update()
     {
         if (gm.state != GameManager.GameState.Play) return;
@@ -116,9 +142,9 @@ public class Shooter : MonoBehaviour
             {
                 pos += subVel;
 
-                // Wall bounces (use camera bounds)
-                // TODO: get actual bounds from camera
-                float hw = 3.2f, hh = 2.4f;
+                // Wall bounces (camera bounds)
+                float hh = Camera.main.orthographicSize;
+                float hw = hh * Camera.main.aspect;
                 float r = GameConstants.BallRadius;
                 if (pos.x - r <= -hw) { pos.x = -hw + r; projVelocity.x *= -1; subVel.x *= -1; projBounces++; }
                 if (pos.x + r >= hw) { pos.x = hw - r; projVelocity.x *= -1; subVel.x *= -1; projBounces++; }

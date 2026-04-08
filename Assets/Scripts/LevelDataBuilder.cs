@@ -14,10 +14,10 @@ public static class LevelDataBuilder
     static readonly Color G = new Color(0.114f, 0.620f, 0.459f); // #1D9E75 Green
     static readonly Color A = new Color(0.937f, 0.624f, 0.153f); // #EF9F27 Amber
 
-    // Helper: OD = BR * 1.75, tOff(d) = OD / d
-    const float BR = 0.11f;
+    // Helper: OD = BR * 1.75, tOff(d) = angular offset for pair separation at pixel distance d
+    const float BR = 0.11f * GameConstants.WorldScale;
     const float OD = BR * 1.75f;
-    static float tOff(float d) => OD / d;
+    static float tOff(float d) => OD / (d / 100f * GameConstants.WorldScale);
 
     public static List<LevelDef> BuildAll()
     {
@@ -258,7 +258,7 @@ public class LevelDef
             foreach (var bd in blob.balls)
             {
                 float a = blob.angle + bd.angleOffset;
-                float d = (blob.distance + bd.distOffset) / 100f; // pixel → world units
+                float d = (blob.distance + bd.distOffset) / 100f * GameConstants.WorldScale; // pixel → world units
                 Vector2 pos = center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * d;
                 result.Add((pos, bd.color));
             }

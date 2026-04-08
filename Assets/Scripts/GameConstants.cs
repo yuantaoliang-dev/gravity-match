@@ -6,23 +6,26 @@ using UnityEngine;
 /// </summary>
 public static class GameConstants
 {
+    // World scale (HTML pixels used 1:100 mapping; 1:50 gives better visibility)
+    public const float WorldScale = 2f;
+
     // Ball
-    public const float BallRadius = 0.11f;
-    public const float OverlapDistance = BallRadius * 1.75f;  // 0.1925 - pair placement distance
-    public const float MatchTouchDist = BallRadius * 2.05f;   // 0.2255 - match detection
+    public const float BallRadius = 0.11f * WorldScale;
+    public const float OverlapDistance = BallRadius * 1.75f;  // pair placement distance
+    public const float MatchTouchDist = BallRadius * 2.05f;   // match detection
     public const float StrictTouchDist = BallRadius * 1.6f;   // startup validation
     public const float TouchDist = BallRadius * 2.3f;          // general touching
     public const float HitDetectDist = BallRadius * 1.7f;     // projectile hit detection
-    public const float MinVisDist = BallRadius * 3f;           // 0.33 - min diff-color visual separation
+    public const float MinVisDist = BallRadius * 3f;           // min diff-color visual separation
 
     // Black Hole
-    public const float BHRadiusBase = 0.20f;
-    public const float BHEventHorizonBase = 0.34f;
-    public const float BHGrowthRadius = 0.004f;    // per ball absorbed
-    public const float BHGrowthEH = 0.006f;         // per ball absorbed
+    public const float BHRadiusBase = 0.20f * WorldScale;
+    public const float BHEventHorizonBase = 0.34f * WorldScale;
+    public const float BHGrowthRadius = 0.004f * WorldScale;    // per ball absorbed
+    public const float BHGrowthEH = 0.006f * WorldScale;         // per ball absorbed
 
     // Projectile
-    public const float BallSpeed = 4.5f;   // units per second (will need tuning)
+    public const float BallSpeed = 4.5f * WorldScale;   // units per second
     public const int MaxBounces = 5;
     public const int TrajectoryMaxDots = 250;
 
