@@ -24,6 +24,9 @@ public class GameManager : MonoBehaviour
     public int score;
     public int comboCount;
 
+    // Cached camera (Camera.main requires MainCamera tag)
+    private Camera cam;
+
     // Ball tracking
     private List<Ball> balls = new List<Ball>();
     private int nextBallId = 0;
@@ -56,13 +59,19 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
-        // Set camera to fit the game field (YAML edits get overwritten by Unity Editor)
-        var cam = Camera.main;
-        if (cam)
-        {
-            cam.orthographicSize = 3.5f;
-            cam.backgroundColor = new Color(0.04f, 0.05f, 0.08f);
-        }
+        // Find camera (Camera.main needs MainCamera tag which may not be set)
+        cam = Camera.main;
+        if (!cam) cam = FindFirstObjectByType<Camera>();
+        if (!cam) { Debug.LogError("[GravityMatch] No camera found!"); return; }
+
+        // Tag it so Camera.main works elsewhere (e.g. Shooter)
+        cam.gameObject.tag = "MainCamera";
+
+        // Set camera to fit the game field
+        cam.orthographicSize = 3.5f;
+        cam.backgroundColor = new Color(0.04f, 0.05f, 0.08f);
+        // Camera must be behind the sprites (z=-10) for near clip plane to work
+        cam.transform.position = new Vector3(0, 0, -10f);
 
         // Position shooter at bottom of camera view
         if (shooter)
@@ -128,13 +137,16 @@ public class GameManager : MonoBehaviour
         }
 
         // === DEBUG: diagnose visibility ===
-        var cam = Camera.main;
         Debug.Log($"[GravityMatch] === Level {index + 1}: {lv.name} ===");
-        Debug.Log($"[GravityMatch] Camera orthoSize={cam.orthographicSize} pos={cam.transform.position} bg={cam.backgroundColor}");
-        Debug.Log($"[GravityMatch] Visible range: X=[{-cam.orthographicSize * cam.aspect:F2}, {cam.orthographicSize * cam.aspect:F2}] Y=[{-cam.orthographicSize:F2}, {cam.orthographicSize:F2}]");
+        if (cam) {
+            Debug.Log($"[GravityMatch] Camera orthoSize={cam.orthographicSize} pos={cam.transform.position} bg={cam.backgroundColor}");
+            Debug.Log($"[GravityMatch] Visible range: X=[{-cam.orthographicSize * cam.aspect:F2}, {cam.orthographicSize * cam.aspect:F2}] Y=[{-cam.orthographicSize:F2}, {cam.orthographicSize:F2}]");
+        } else {
+            Debug.Log("[GravityMatch] Camera is NULL!");
+        }
         Debug.Log($"[GravityMatch] BlackHole pos={blackHole.position} scale={blackHole.localScale} BHRadius={BHRadius}");
-        var bhSr = blackHole.GetComponent<SpriteRenderer>();
-        if (bhSr) Debug.Log($"[GravityMatch] BlackHole SR enabled={bhSr.enabled} color={bhSr.color} material={bhSr.material.shader.name} sortOrder={bhSr.sortingOrder}");
+        var bhSrDbg = blackHole.GetComponent<SpriteRenderer>();
+        if (bhSrDbg) Debug.Log($"[GravityMatch] BlackHole SR enabled={bhSrDbg.enabled} color={bhSrDbg.color} material={bhSrDbg.material.shader.name} sortOrder={bhSrDbg.sortingOrder}");
         Debug.Log($"[GravityMatch] Shooter pos={shooter.transform.position} scale={shooter.transform.localScale}");
         Debug.Log($"[GravityMatch] Ball count={balls.Count} WorldScale={GameConstants.WorldScale} BallRadius={GameConstants.BallRadius}");
         float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
