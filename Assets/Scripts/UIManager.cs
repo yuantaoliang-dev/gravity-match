@@ -23,9 +23,16 @@ public class UIManager : MonoBehaviour
 
     void Start()
     {
-        retryButton.onClick.AddListener(() => GameManager.Instance.Restart());
-        nextButton.onClick.AddListener(() => GameManager.Instance.NextLevel());
-        overlay.SetActive(false);
+        if (retryButton) retryButton.onClick.AddListener(() => GameManager.Instance.Restart());
+        if (nextButton) nextButton.onClick.AddListener(() => GameManager.Instance.NextLevel());
+        if (overlay) overlay.SetActive(false);
+
+        // Clear default "New Text" so HUD starts clean
+        if (ballsText) ballsText.text = "0";
+        if (scoreText) scoreText.text = "0";
+        if (targetsText) targetsText.text = "0";
+        if (remainingCount) remainingCount.text = "0";
+        if (levelNameText) levelNameText.text = "";
     }
 
     public void UpdateHUD(int ballsLeft, int score, int targets)

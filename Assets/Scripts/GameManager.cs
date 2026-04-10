@@ -371,30 +371,39 @@ public class GameManager : MonoBehaviour
     void UpdateRotation()
     {
         float diff = rotationTarget - fieldAngle;
-        if (Mathf.Abs(diff) < 0.1f)
+        // Exponential ease: 10% of remaining per tick at 60fps, frame-rate independent
+        float t = 1f - Mathf.Pow(0.9f, Time.deltaTime * 60f);
+        float step = diff * t;
+
+        if (Mathf.Abs(diff) < GameConstants.RotationEaseThreshold)
         {
+            // Snap to target
+            step = diff;
             fieldAngle = rotationTarget;
             isRotating = false;
-            ForceValidColors();
-            state = GameState.Play;
-            ui.UpdateHUD(ballsLeft, score, balls.Count);
-            CheckEnd();
         }
         else
         {
-            float step = diff * 0.1f;
             fieldAngle += step;
-            // Rotate all balls around BH center
-            Vector2 center = blackHole.position;
-            float rad = step * Mathf.Deg2Rad;
-            foreach (var b in balls)
-            {
-                Vector2 offset = (Vector2)b.transform.position - center;
-                float a = Mathf.Atan2(offset.y, offset.x) + rad;
-                float d = offset.magnitude;
-                b.transform.position = center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * d;
-            }
-            ForceValidColors();
+        }
+
+        // Rotate all balls around BH center
+        Vector2 center = blackHole.position;
+        float rad = step * Mathf.Deg2Rad;
+        foreach (var b in balls)
+        {
+            Vector2 offset = (Vector2)b.transform.position - center;
+            float a = Mathf.Atan2(offset.y, offset.x) + rad;
+            float d = offset.magnitude;
+            b.transform.position = center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * d;
+        }
+        ForceValidColors();
+
+        if (!isRotating)
+        {
+            state = GameState.Play;
+            ui.UpdateHUD(ballsLeft, score, balls.Count);
+            CheckEnd();
         }
     }
 

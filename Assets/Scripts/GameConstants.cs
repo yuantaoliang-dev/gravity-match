@@ -21,8 +21,8 @@ public static class GameConstants
     // Black Hole
     public const float BHRadiusBase = 0.20f * WorldScale;
     public const float BHEventHorizonBase = 0.34f * WorldScale;
-    public const float BHGrowthRadius = 0.004f * WorldScale;    // per ball absorbed
-    public const float BHGrowthEH = 0.006f * WorldScale;         // per ball absorbed
+    public const float BHGrowthRadius = 0.002f * WorldScale;    // per ball absorbed (halved for visual balance)
+    public const float BHGrowthEH = 0.003f * WorldScale;         // per ball absorbed
 
     // Projectile
     public const float BallSpeed = 4.5f * WorldScale;   // units per second
