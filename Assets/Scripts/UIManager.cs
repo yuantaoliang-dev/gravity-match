@@ -21,18 +21,24 @@ public class UIManager : MonoBehaviour
     [Header("Remaining Warning")]
     public TextMeshProUGUI remainingCount;
 
-    void Start()
+    void Awake()
     {
-        if (retryButton) retryButton.onClick.AddListener(() => GameManager.Instance.Restart());
-        if (nextButton) nextButton.onClick.AddListener(() => GameManager.Instance.NextLevel());
-        if (overlay) overlay.SetActive(false);
-
-        // Clear default "New Text" so HUD starts clean
+        // Clear default "New Text" immediately so HUD starts clean
         if (ballsText) ballsText.text = "0";
         if (scoreText) scoreText.text = "0";
         if (targetsText) targetsText.text = "0";
         if (remainingCount) remainingCount.text = "0";
         if (levelNameText) levelNameText.text = "";
+        if (starsText) starsText.text = "";
+        if (resultTitle) resultTitle.text = "";
+        if (resultDetail) resultDetail.text = "";
+    }
+
+    void Start()
+    {
+        if (retryButton) retryButton.onClick.AddListener(() => GameManager.Instance.Restart());
+        if (nextButton) nextButton.onClick.AddListener(() => GameManager.Instance.NextLevel());
+        if (overlay) overlay.SetActive(false);
     }
 
     public void UpdateHUD(int ballsLeft, int score, int targets)

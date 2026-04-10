@@ -70,6 +70,21 @@ public class Shooter : MonoBehaviour
         CreateAimLine(mat);
     }
 
+    static Material CreateLineMaterial()
+    {
+        // Try URP Particles/Unlit first (supports vertex colors + alpha for LineRenderer)
+        var shader = Shader.Find("Universal Render Pipeline/Particles/Unlit");
+        if (shader == null) shader = Shader.Find("Particles/Standard Unlit");
+        if (shader == null) shader = Shader.Find("Legacy Shaders/Particles/Alpha Blended");
+        if (shader == null) shader = Shader.Find("Sprites/Default");
+        var mat = new Material(shader);
+        // Ensure additive/alpha blending for transparency
+        mat.SetFloat("_Surface", 1); // Transparent (URP)
+        mat.SetFloat("_Blend", 0);   // Alpha blend
+        mat.renderQueue = 3000;      // Transparent queue
+        return mat;
+    }
+
     void CreateTrajectoryLine(Material baseMat)
     {
         var go = new GameObject("TrajectoryLine");
@@ -80,13 +95,10 @@ public class Shooter : MonoBehaviour
         trajectoryLine.endWidth = 0.02f;
         trajectoryLine.startColor = new Color(1f, 1f, 1f, 0.45f);
         trajectoryLine.endColor = new Color(1f, 1f, 1f, 0.05f);
-        trajectoryLine.sortingOrder = 2;
+        trajectoryLine.sortingOrder = 10;
         trajectoryLine.numCapVertices = 2;
         trajectoryLine.positionCount = 0;
-        if (baseMat != null) trajectoryLine.material = new Material(baseMat);
-        // Dashed effect via texture scale
-        trajectoryLine.textureMode = LineTextureMode.Tile;
-        trajectoryLine.textureScale = new Vector2(1f / 0.15f, 1f);
+        trajectoryLine.material = CreateLineMaterial();
     }
 
     void CreateAimLine(Material baseMat)
@@ -99,9 +111,9 @@ public class Shooter : MonoBehaviour
         aimLine.endWidth = 0.035f;
         aimLine.startColor = new Color(1f, 1f, 1f, 0.6f);
         aimLine.endColor = new Color(1f, 1f, 1f, 0.3f);
-        aimLine.sortingOrder = 2;
+        aimLine.sortingOrder = 10;
         aimLine.positionCount = 0;
-        if (baseMat != null) aimLine.material = new Material(baseMat);
+        aimLine.material = CreateLineMaterial();
     }
 
     void Update()
@@ -281,6 +293,7 @@ public class Shooter : MonoBehaviour
     void ProcessMatch(Ball newBall)
     {
         var grp = gm.FindGroup(newBall, GameConstants.MatchTouchDist);
+        Debug.Log($"[GravityMatch] ProcessMatch: group size={grp.Count}, color={GameConstants.ColorToHex(newBall.ballColor)}");
         if (grp.Count >= 3)
         {
             var allTargets = new List<Ball>(grp);
@@ -338,20 +351,8 @@ public class Shooter : MonoBehaviour
 
             gm.RemoveBalls(allTargets);
 
-            // Combo check
-            bool hasSingle = gm.Balls.Any(b =>
-                !gm.GetTouching(b, GameConstants.MatchTouchDist).Any(t => t.ballColor == b.ballColor));
-            if (hasSingle)
-            {
-                gm.comboCount++;
-                if (gm.comboCount >= 3)
-                {
-                    gm.comboCount = 0;
-                }
-            }
-            else gm.comboCount = 0;
-
-            gm.StartRotation();
+            // Wait for removal to be visible, then combo check + rotate
+            gm.StartPostMatchSequence(grp.Count);
         }
         else
         {

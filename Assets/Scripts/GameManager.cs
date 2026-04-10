@@ -50,6 +50,7 @@ public class GameManager : MonoBehaviour
     private int[] levelStars;
 
     public enum GameState { Play, Highlight, Suck, Buddy, Rotating, Won, Lost }
+    // Highlight, Suck, Buddy: used during post-match sequence (blocks input)
 
     void Awake()
     {
@@ -258,9 +259,9 @@ public class GameManager : MonoBehaviour
     {
         foreach (var b in list)
         {
-            // TODO: play suction animation
             balls.Remove(b);
-            Destroy(b.gameObject, 0.5f); // delay for animation
+            b.gameObject.SetActive(false); // hide immediately this frame
+            Destroy(b.gameObject);         // cleanup next frame
         }
         bhAte += list.Count;
     }
@@ -358,6 +359,47 @@ public class GameManager : MonoBehaviour
         nextColor = PickNextColor();
         ForceValidColors();
         ui.UpdateHUD(ballsLeft, score, balls.Count);
+    }
+
+    // ===== MATCH RESOLUTION =====
+    /// <summary>
+    /// Called after balls are removed. Waits briefly so removal is visible, then rotates.
+    /// Matches HTML reference phases: highlight(22f) → suck(32f) → rotate.
+    /// </summary>
+    public void StartPostMatchSequence(int matchCount)
+    {
+        Debug.Log($"[GravityMatch] StartPostMatchSequence: matchCount={matchCount}, waiting {GameConstants.SuckDuration}s before rotation");
+        state = GameState.Suck; // block input during wait
+        StartCoroutine(PostMatchCoroutine(matchCount));
+    }
+
+    IEnumerator PostMatchCoroutine(int matchCount)
+    {
+        // Brief pause so ball removal is visible before rotation
+        Debug.Log("[GravityMatch] PostMatchCoroutine: waiting...");
+        yield return new WaitForSeconds(GameConstants.SuckDuration);
+        Debug.Log("[GravityMatch] PostMatchCoroutine: wait done, starting rotation");
+
+        // Combo check: are there singletons (balls with no same-color neighbor)?
+        bool hasSingle = balls.Any(b =>
+            !GetTouching(b, GameConstants.MatchTouchDist).Any(t => t.ballColor == b.ballColor));
+        if (hasSingle)
+        {
+            comboCount++;
+            if (comboCount >= 3)
+            {
+                comboCount = 0;
+                // TODO: buddy system (item 9)
+            }
+        }
+        else
+        {
+            comboCount = 0;
+        }
+
+        ForceValidColors();
+        ui.UpdateHUD(ballsLeft, score, balls.Count);
+        StartRotation();
     }
 
     // ===== ROTATION =====
