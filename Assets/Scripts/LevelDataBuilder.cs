@@ -69,6 +69,12 @@ public static class LevelDataBuilder
         bl.Add(Blob(2.0f, 120, Single(R)));
         bl.Add(Blob(2.05f, 125, Single(B)));
 
+        // --- Zone D: BH auto-absorb test ---
+        // Ball near BH edge. Shoot a few balls into BH to grow it,
+        // then this ball gets auto-absorbed.
+        // BHEventHorizonBase=0.34 → dist 34+12=46px ≈ just outside EH+BR*0.5
+        bl.Add(Blob(3.5f, 46, Single(B)));
+
         return lv;
     }
 
