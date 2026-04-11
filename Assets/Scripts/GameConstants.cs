@@ -6,8 +6,8 @@ using UnityEngine;
 /// </summary>
 public static class GameConstants
 {
-    // World scale (HTML pixels used 1:100 mapping; 1:50 gives better visibility)
-    public const float WorldScale = 2f;
+    // World scale: HTML pixel / 100. 1px = 0.01 units.
+    public const float WorldScale = 1f;
 
     // Ball
     public const float BallRadius = 0.11f * WorldScale;

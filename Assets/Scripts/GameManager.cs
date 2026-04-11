@@ -70,15 +70,19 @@ public class GameManager : MonoBehaviour
         cam.gameObject.tag = "MainCamera";
 
         // Set camera to fit the game field
-        cam.orthographicSize = 3.5f;
+        // HTML: 480px height, WorldScale=1 → 480/100*1=4.8 full height → orthoSize=2.4
+        cam.orthographicSize = 2.4f;
         cam.backgroundColor = new Color(0.04f, 0.05f, 0.08f);
         // Camera must be behind the sprites (z=-10) for near clip plane to work
         cam.transform.position = new Vector3(0, 0, -10f);
 
-        // Position shooter at bottom of camera view
+        // HTML: BY=H/2-20=220, center=240, BH 20px above → 20/100*1=0.2 units
+        blackHole.position = new Vector3(0, 0.2f, 0);
+
+        // HTML: SY=H-36=444, BY=220, offset=224px → 224/100*1=2.24 below BH
         if (shooter)
         {
-            shooter.transform.position = new Vector3(0, -cam.orthographicSize + 0.7f, 0);
+            shooter.transform.position = new Vector3(0, 0.2f - 2.24f, 0);
         }
 
         // Setup BlackHole visual
@@ -174,6 +178,9 @@ public class GameManager : MonoBehaviour
         // Push apart overlapping different-color balls
         PushApartDifferentColors();
 
+        // Normalize same-color pair distances to OverlapDistance
+        NormalizePairDistances();
+
         // Init color queue
         currentColor = PickNextColor();
         nextColor = PickNextColor();
@@ -211,7 +218,7 @@ public class GameManager : MonoBehaviour
                     if (d < minVis && d > 0.001f)
                     {
                         Vector2 dir = ((Vector2)bj.transform.position - (Vector2)bi.transform.position).normalized;
-                        float push = minVis - d + 0.01f;
+                        float push = minVis - d + 0.01f * GameConstants.WorldScale;
                         bool iP = pairIds.Contains(bi.id), jP = pairIds.Contains(bj.id);
                         if (iP && !jP)
                             bj.transform.position += (Vector3)(dir * push);
@@ -233,15 +240,49 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    void NormalizePairDistances()
+    {
+        // After push-apart, same-color pair balls may have drifted.
+        // Normalize each touching same-color pair to exactly OverlapDistance.
+        float od = GameConstants.OverlapDistance;
+        float maxDist = GameConstants.MatchTouchDist;
+        var visited = new HashSet<int>();
+
+        foreach (var b in balls)
+        {
+            if (visited.Contains(b.id)) continue;
+            var grp = FindGroup(b, maxDist);
+            foreach (var g in grp) visited.Add(g.id);
+            if (grp.Count < 2) continue;
+
+            // For each adjacent pair within the group, correct distance
+            for (int i = 0; i < grp.Count; i++)
+            {
+                for (int j = i + 1; j < grp.Count; j++)
+                {
+                    float d = grp[i].DistTo(grp[j]);
+                    if (d > maxDist || d < 0.001f) continue;
+                    // Adjust both balls equally toward/away to reach OverlapDistance
+                    Vector2 pi = grp[i].transform.position;
+                    Vector2 pj = grp[j].transform.position;
+                    Vector2 dir = (pj - pi).normalized;
+                    Vector2 mid = (pi + pj) * 0.5f;
+                    grp[i].transform.position = (Vector3)(mid - dir * od * 0.5f);
+                    grp[j].transform.position = (Vector3)(mid + dir * od * 0.5f);
+                }
+            }
+        }
+    }
+
     void ClampBallPosition(Ball b)
     {
         // TODO: clamp to camera bounds
         Vector2 center = blackHole.position;
         float dist = b.DistTo(center);
-        if (dist < BHEventHorizon + GameConstants.BallRadius + 0.02f)
+        if (dist < BHEventHorizon + GameConstants.BallRadius + 0.02f * GameConstants.WorldScale)
         {
             Vector2 dir = ((Vector2)b.transform.position - center).normalized;
-            b.transform.position = center + dir * (BHEventHorizon + GameConstants.BallRadius + 0.03f);
+            b.transform.position = center + dir * (BHEventHorizon + GameConstants.BallRadius + 0.03f * GameConstants.WorldScale);
         }
     }
 
@@ -363,26 +404,52 @@ public class GameManager : MonoBehaviour
 
     // ===== MATCH RESOLUTION =====
     /// <summary>
-    /// Called after balls are removed. Waits briefly so removal is visible, then rotates.
-    /// Matches HTML reference phases: highlight(22f) → suck(32f) → rotate.
+    /// Full match sequence matching HTML v21 phases:
+    /// 1. Highlight (0.37s) — matched balls pulse white, player sees what matched
+    /// 2. Remove + Suck (0.53s) — balls disappear, pause before rotation
+    /// 3. Combo check → rotation
     /// </summary>
-    public void StartPostMatchSequence(int matchCount)
+    public void StartMatchSequence(int matchCount, List<Ball> targets)
     {
-        Debug.Log($"[GravityMatch] StartPostMatchSequence: matchCount={matchCount}, waiting {GameConstants.SuckDuration}s before rotation");
-        state = GameState.Suck; // block input during wait
-        StartCoroutine(PostMatchCoroutine(matchCount));
+        // Score before highlight so HUD updates immediately
+        int pts = matchCount >= 5 ? GameConstants.Score5Match :
+                  matchCount == 4 ? GameConstants.Score4Match : GameConstants.Score3Match;
+        score += targets.Count * pts;
+        ui.UpdateHUD(ballsLeft, score, balls.Count);
+
+        Debug.Log($"[GravityMatch] StartMatchSequence: {matchCount}-match, targets={targets.Count}");
+        state = GameState.Highlight;
+        StartCoroutine(MatchSequenceCoroutine(matchCount, targets));
     }
 
-    IEnumerator PostMatchCoroutine(int matchCount)
+    IEnumerator MatchSequenceCoroutine(int matchCount, List<Ball> targets)
     {
-        // Brief pause so ball removal is visible before rotation
-        Debug.Log("[GravityMatch] PostMatchCoroutine: waiting...");
-        yield return new WaitForSeconds(GameConstants.SuckDuration);
-        Debug.Log("[GravityMatch] PostMatchCoroutine: wait done, starting rotation");
+        // Phase 1: Highlight — pulse matched balls so player sees the match
+        float highlightEnd = Time.time + GameConstants.HighlightDuration;
+        while (Time.time < highlightEnd)
+        {
+            // Pulse: lerp between original color and white
+            float t = Mathf.PingPong((highlightEnd - Time.time) * 8f, 1f);
+            foreach (var b in targets)
+            {
+                if (b == null) continue;
+                var sr = b.GetComponent<SpriteRenderer>();
+                if (sr != null) sr.color = Color.Lerp(b.ballColor, Color.white, t * 0.6f);
+            }
+            yield return null;
+        }
 
-        // Combo check: are there singletons (balls with no same-color neighbor)?
+        // Phase 2: Remove balls + suck pause
+        state = GameState.Suck;
+        RemoveBalls(targets);
+        ForceValidColors();
+        ui.UpdateHUD(ballsLeft, score, balls.Count);
+
+        yield return new WaitForSeconds(GameConstants.SuckDuration);
+
+        // Phase 3: Combo check → rotation
         bool hasSingle = balls.Any(b =>
-            !GetTouching(b, GameConstants.MatchTouchDist).Any(t => t.ballColor == b.ballColor));
+            !GetTouching(b, GameConstants.MatchTouchDist).Any(nb => nb.ballColor == b.ballColor));
         if (hasSingle)
         {
             comboCount++;

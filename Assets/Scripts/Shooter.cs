@@ -39,7 +39,7 @@ public class Shooter : MonoBehaviour
         // Setup ball color displays (match HTML: current at center, next to LEFT)
         float br = GameConstants.BallRadius;
         float ballDiam = br * 2f;
-        float curSize = (br + 0.02f) * 2f; // HTML: BR+2 radius
+        float curSize = (br + 0.02f * GameConstants.WorldScale) * 2f; // HTML: BR+2 radius
         if (currentBallDisplay)
         {
             currentBallDisplay.transform.localPosition = Vector3.zero;
@@ -51,7 +51,7 @@ public class Shooter : MonoBehaviour
             var outlineGo = new GameObject("CurrentOutline");
             outlineGo.transform.SetParent(transform, false);
             outlineGo.transform.localPosition = Vector3.zero;
-            float outlineSize = (br + 0.05f) * 2f;
+            float outlineSize = (br + 0.05f * GameConstants.WorldScale) * 2f;
             outlineGo.transform.localScale = new Vector3(outlineSize, outlineSize, 1f);
             var outlineSr = outlineGo.AddComponent<SpriteRenderer>();
             outlineSr.sprite = currentBallDisplay.sprite;
@@ -76,16 +76,9 @@ public class Shooter : MonoBehaviour
 
     static Material CreateLineMaterial()
     {
-        // Try URP Particles/Unlit first (supports vertex colors + alpha for LineRenderer)
-        var shader = Shader.Find("Universal Render Pipeline/Particles/Unlit");
-        if (shader == null) shader = Shader.Find("Particles/Standard Unlit");
-        if (shader == null) shader = Shader.Find("Legacy Shaders/Particles/Alpha Blended");
-        if (shader == null) shader = Shader.Find("Sprites/Default");
-        var mat = new Material(shader);
-        // Ensure additive/alpha blending for transparency
-        mat.SetFloat("_Surface", 1); // Transparent (URP)
-        mat.SetFloat("_Blend", 0);   // Alpha blend
-        mat.renderQueue = 3000;      // Transparent queue
+        // Use project-standard unlit sprite shader for LineRenderer
+        var mat = GameConstants.CreateUnlitSpriteMaterial();
+        if (mat != null) mat.renderQueue = 3000; // Transparent queue
         return mat;
     }
 
@@ -95,8 +88,8 @@ public class Shooter : MonoBehaviour
         go.transform.SetParent(transform, false);
         trajectoryLine = go.AddComponent<LineRenderer>();
         trajectoryLine.useWorldSpace = true;
-        trajectoryLine.startWidth = 0.05f;
-        trajectoryLine.endWidth = 0.02f;
+        trajectoryLine.startWidth = 0.03f * GameConstants.WorldScale;
+        trajectoryLine.endWidth = 0.01f * GameConstants.WorldScale;
         trajectoryLine.startColor = new Color(1f, 1f, 1f, 0.45f);
         trajectoryLine.endColor = new Color(1f, 1f, 1f, 0.05f);
         trajectoryLine.sortingOrder = 10;
@@ -111,8 +104,8 @@ public class Shooter : MonoBehaviour
         go.transform.SetParent(transform, false);
         aimLine = go.AddComponent<LineRenderer>();
         aimLine.useWorldSpace = true;
-        aimLine.startWidth = 0.035f;
-        aimLine.endWidth = 0.035f;
+        aimLine.startWidth = 0.02f * GameConstants.WorldScale;
+        aimLine.endWidth = 0.02f * GameConstants.WorldScale;
         aimLine.startColor = new Color(1f, 1f, 1f, 0.6f);
         aimLine.endColor = new Color(1f, 1f, 1f, 0.3f);
         aimLine.sortingOrder = 10;
@@ -261,25 +254,78 @@ public class Shooter : MonoBehaviour
                 if (hitBall != null)
                 {
                     Color projColor = projectile.GetComponent<Ball>().ballColor;
+                    Vector2 vel = projVelocity.normalized;
                     Destroy(projectile);
                     projectile = null;
 
-                    // Place new ball at overlap distance from hit ball
-                    Vector2 dir = (pos - (Vector2)hitBall.transform.position).normalized;
-                    Vector2 newPos = (Vector2)hitBall.transform.position + dir * GameConstants.OverlapDistance;
+                    Vector2 hitCenter = hitBall.transform.position;
+                    float od = GameConstants.OverlapDistance;
+                    float hd = GameConstants.HitDetectDist;
+
+                    // Look-ahead: would the projectile hit a SECOND ball if
+                    // it continued flying through the first?
+                    // Ray-cast along trajectory, find closest other ball hit
+                    // within a reasonable travel distance.
+                    float maxTravel = od * 3f;
+                    Ball secondHit = null;
+                    float secondHitT = float.MaxValue;
+
+                    foreach (var b in gm.Balls)
+                    {
+                        if (b.id == hitBall.id) continue;
+                        Vector2 bc = b.transform.position;
+                        Vector2 db = pos - bc;
+                        // Ray-circle intersection: |pos + t*vel - bc| = HitDetectDist
+                        float bCoeff = 2f * Vector2.Dot(db, vel);
+                        float cCoeff = db.sqrMagnitude - hd * hd;
+                        float disc = bCoeff * bCoeff - 4f * cCoeff;
+                        if (disc < 0) continue;
+
+                        float sqrtDisc = Mathf.Sqrt(disc);
+                        float t = (-bCoeff - sqrtDisc) / 2f; // entry point
+                        if (t < 0) t = 0f; // already inside range
+                        if (t > maxTravel) continue;
+
+                        if (t < secondHitT)
+                        {
+                            secondHitT = t;
+                            secondHit = b;
+                        }
+                    }
+
+                    Vector2 newPos;
+                    if (secondHit != null)
+                    {
+                        // Second ball found: stop at contact with second ball.
+                        // Place at OverlapDistance from second ball (approach side).
+                        // This naturally places the new ball BETWEEN the two balls.
+                        Vector2 contactPos = pos + vel * secondHitT;
+                        Vector2 dirFromSecond = (contactPos - (Vector2)secondHit.transform.position).normalized;
+                        newPos = (Vector2)secondHit.transform.position + dirFromSecond * od;
+                        Debug.Log($"[GravityMatch] Second hit found: placing between hitBall and secondHit");
+                    }
+                    else
+                    {
+                        // No second ball: stop at first contact point (approach side)
+                        Vector2 approachDir = (pos - hitCenter).normalized;
+                        newPos = hitCenter + approachDir * od;
+                    }
 
                     // Push away from other balls
+                    float pushThreshold = od - 0.005f * GameConstants.WorldScale;
+                    float pushNudge = 0.002f * GameConstants.WorldScale;
                     for (int it = 0; it < 30; it++)
                     {
                         bool pushed = false;
                         foreach (var b2 in gm.Balls)
                         {
                             if (b2.id == hitBall.id) continue;
+                            if (secondHit != null && b2.id == secondHit.id) continue;
                             float d2 = Vector2.Distance(newPos, b2.transform.position);
-                            if (d2 < GameConstants.OverlapDistance - 0.005f)
+                            if (d2 < pushThreshold)
                             {
                                 Vector2 pDir = (newPos - (Vector2)b2.transform.position).normalized;
-                                newPos += pDir * (GameConstants.OverlapDistance - d2 + 0.002f);
+                                newPos += pDir * (od - d2 + pushNudge);
                                 pushed = true;
                             }
                         }
@@ -298,7 +344,9 @@ public class Shooter : MonoBehaviour
 
     void ProcessMatch(Ball newBall)
     {
+        // Standard v21 match detection: BFS with MatchTouchDist
         var grp = gm.FindGroup(newBall, GameConstants.MatchTouchDist);
+
         Debug.Log($"[GravityMatch] ProcessMatch: group size={grp.Count}, color={GameConstants.ColorToHex(newBall.ballColor)}");
         if (grp.Count >= 3)
         {
@@ -348,17 +396,11 @@ public class Shooter : MonoBehaviour
 
                 var coneExtra = gm.Balls.Where(b => hitIds.Contains(b.id)).ToList();
                 allTargets.AddRange(coneExtra);
+                Debug.Log($"[GravityMatch] Cone sweep: {grp.Count}-match, colorOnly={colorOnly}, coneExtra={coneExtra.Count}, totalTargets={allTargets.Count}");
             }
 
-            // Calculate score
-            int pts = grp.Count >= 5 ? GameConstants.Score5Match :
-                      grp.Count == 4 ? GameConstants.Score4Match : GameConstants.Score3Match;
-            gm.score += allTargets.Count * pts;
-
-            gm.RemoveBalls(allTargets);
-
-            // Wait for removal to be visible, then combo check + rotate
-            gm.StartPostMatchSequence(grp.Count);
+            // Pass targets to GameManager for highlight → remove → rotate sequence
+            gm.StartMatchSequence(grp.Count, allTargets);
         }
         else
         {
@@ -413,7 +455,7 @@ public class Shooter : MonoBehaviour
         if (aimLine == null) return;
         aimLine.positionCount = 2;
         aimLine.SetPosition(0, (Vector3)start);
-        aimLine.SetPosition(1, (Vector3)(start + dir * 0.6f));
+        aimLine.SetPosition(1, (Vector3)(start + dir * 0.3f * GameConstants.WorldScale));
     }
 
     void HideAimLine()

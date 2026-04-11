@@ -23,12 +23,53 @@ public static class LevelDataBuilder
     {
         return new List<LevelDef>
         {
+            BuildTestLevel(), // Test level for verifying match mechanics
             BuildLevel1(),
             BuildLevel2(),
             BuildLevel3(),
             BuildLevel4(),
             BuildLevel5(),
         };
+    }
+
+    // ===== Test Level: verify 3/4/5 match + cone =====
+    // Uses standard FourMatch/FiveMatch helpers from v21.
+    // 4/5-match requires aiming INTO the gap between pair and singleton.
+    // Angles chosen so gaps face toward shooter for easier bridging.
+    static LevelDef BuildTestLevel()
+    {
+        var lv = new LevelDef
+        {
+            name = "TEST: Match Verify",
+            tip = "Blue=3match, Red=4match(aim at singleton), Green=5match(aim into gap)",
+            budget = 30,
+            colors = new[] { R, B, G },
+            starScore3 = 1000,
+            starScore2 = 500,
+        };
+        var bl = lv.blobs;
+
+        // --- Zone A (angle 1.2, upper-right): 3-match test ---
+        // 2 Blue pair → shoot 1 Blue at them = 3-match
+        bl.Add(Blob(1.2f, 75, Pair(75, B)));
+
+        // --- Zone B (angle 5.0, right side): 4-match test ---
+        // FourMatch = pair(2) + gap + singleton(1) at same radius
+        // Gap faces upper-right; shoot from lower-left toward singleton
+        // New ball placed between singleton and pair → 4-match + cone
+        bl.Add(Blob(5.0f, 75, FourMatch(75, R)));
+        // Red cone target (swept by 4-match same-color cone)
+        bl.Add(Blob(5.0f, 120, Single(R)));
+
+        // --- Zone C (angle 2.0, upper-left): 5-match test ---
+        // FiveMatch = 2 separated pairs(4) at same radius
+        // Shoot into gap between pairs → 5-match + all-color cone
+        bl.Add(Blob(2.0f, 75, FiveMatch(75, G)));
+        // Mixed cone targets (5-match sweeps ALL colors)
+        bl.Add(Blob(2.0f, 120, Single(R)));
+        bl.Add(Blob(2.05f, 125, Single(B)));
+
+        return lv;
     }
 
     // ===== Level 1: First Steps =====
