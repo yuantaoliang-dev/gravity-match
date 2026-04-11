@@ -36,20 +36,22 @@ public class Shooter : MonoBehaviour
             if (mat != null) sr.material = new Material(mat);
         }
 
-        // Setup ball color displays
-        float ballDiam = GameConstants.BallRadius * 2f;
+        // Setup ball color displays (match HTML: current at center, next to LEFT)
+        float br = GameConstants.BallRadius;
+        float ballDiam = br * 2f;
+        float curSize = (br + 0.02f) * 2f; // HTML: BR+2 radius
         if (currentBallDisplay)
         {
-            currentBallDisplay.transform.localPosition = new Vector3(0, 0.15f, 0);
-            currentBallDisplay.transform.localScale = new Vector3(ballDiam, ballDiam, 1f);
+            currentBallDisplay.transform.localPosition = Vector3.zero;
+            currentBallDisplay.transform.localScale = new Vector3(curSize, curSize, 1f);
             currentBallDisplay.sortingOrder = 5;
             if (mat != null) currentBallDisplay.material = new Material(mat);
 
-            // White outline ring behind current ball
+            // White outline ring behind current ball (HTML: BR+5 stroke)
             var outlineGo = new GameObject("CurrentOutline");
             outlineGo.transform.SetParent(transform, false);
-            outlineGo.transform.localPosition = new Vector3(0, 0.15f, 0);
-            float outlineSize = ballDiam * 1.35f;
+            outlineGo.transform.localPosition = Vector3.zero;
+            float outlineSize = (br + 0.05f) * 2f;
             outlineGo.transform.localScale = new Vector3(outlineSize, outlineSize, 1f);
             var outlineSr = outlineGo.AddComponent<SpriteRenderer>();
             outlineSr.sprite = currentBallDisplay.sprite;
@@ -59,8 +61,10 @@ public class Shooter : MonoBehaviour
         }
         if (nextBallDisplay)
         {
-            nextBallDisplay.transform.localPosition = new Vector3(0.5f, 0.15f, 0);
-            nextBallDisplay.transform.localScale = new Vector3(ballDiam * 0.65f, ballDiam * 0.65f, 1f);
+            // HTML: nxX = SX - BR*9, scaled to Unity view
+            float nxOffset = -br * 5f;
+            nextBallDisplay.transform.localPosition = new Vector3(nxOffset, 0, 0);
+            nextBallDisplay.transform.localScale = new Vector3(ballDiam, ballDiam, 1f);
             nextBallDisplay.sortingOrder = 5;
             if (mat != null) nextBallDisplay.material = new Material(mat);
         }
@@ -118,6 +122,9 @@ public class Shooter : MonoBehaviour
 
     void Update()
     {
+        // Always update ball color display (so it refreshes immediately after firing)
+        UpdateDisplay();
+
         if (gm.state != GameManager.GameState.Play) return;
         if (projectile != null)
         {
@@ -126,7 +133,6 @@ public class Shooter : MonoBehaviour
         else
         {
             HandleInput();
-            UpdateDisplay();
         }
     }
 
@@ -418,6 +424,12 @@ public class Shooter : MonoBehaviour
     void UpdateDisplay()
     {
         if (currentBallDisplay) currentBallDisplay.color = gm.currentColor;
-        if (nextBallDisplay) nextBallDisplay.color = gm.nextColor;
+        if (nextBallDisplay)
+        {
+            // HTML: next ball drawn at globalAlpha=0.5
+            Color nc = gm.nextColor;
+            nc.a = 0.5f;
+            nextBallDisplay.color = nc;
+        }
     }
 }

@@ -343,7 +343,7 @@ public class GameManager : MonoBehaviour
 
     public void ForceValidColors()
     {
-        if (balls.Count == 0 || state != GameState.Play) return;
+        if (balls.Count == 0) return;
         var pc = GetPairColors();
         if (pc.Count == 0) pc = balls.Select(b => b.ballColor).Distinct().ToList();
         if (pc.Count == 0) return;
