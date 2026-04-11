@@ -175,11 +175,12 @@ public class GameManager : MonoBehaviour
             if (!found) break;
         }
 
-        // Push apart overlapping different-color balls
+        // Push apart different-color balls so they don't visually overlap
         PushApartDifferentColors();
 
-        // Normalize same-color pair distances to OverlapDistance
-        NormalizePairDistances();
+        // Re-normalize same-color pairs to consistent OverlapDistance
+        // (PushApart may have shifted pair members)
+        RestorePairDistances();
 
         // Init color queue
         currentColor = PickNextColor();
@@ -240,37 +241,26 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    void NormalizePairDistances()
+    void RestorePairDistances()
     {
-        // After push-apart, same-color pair balls may have drifted.
-        // Normalize each touching same-color pair to exactly OverlapDistance.
+        // Only fix groups of exactly 2 same-color balls (true pairs).
+        // Adjust to OverlapDistance along their connecting line, midpoint fixed.
         float od = GameConstants.OverlapDistance;
-        float maxDist = GameConstants.MatchTouchDist;
         var visited = new HashSet<int>();
 
         foreach (var b in balls)
         {
             if (visited.Contains(b.id)) continue;
-            var grp = FindGroup(b, maxDist);
+            var grp = FindGroup(b, GameConstants.MatchTouchDist);
             foreach (var g in grp) visited.Add(g.id);
-            if (grp.Count < 2) continue;
+            if (grp.Count != 2) continue;
 
-            // For each adjacent pair within the group, correct distance
-            for (int i = 0; i < grp.Count; i++)
-            {
-                for (int j = i + 1; j < grp.Count; j++)
-                {
-                    float d = grp[i].DistTo(grp[j]);
-                    if (d > maxDist || d < 0.001f) continue;
-                    // Adjust both balls equally toward/away to reach OverlapDistance
-                    Vector2 pi = grp[i].transform.position;
-                    Vector2 pj = grp[j].transform.position;
-                    Vector2 dir = (pj - pi).normalized;
-                    Vector2 mid = (pi + pj) * 0.5f;
-                    grp[i].transform.position = (Vector3)(mid - dir * od * 0.5f);
-                    grp[j].transform.position = (Vector3)(mid + dir * od * 0.5f);
-                }
-            }
+            Vector2 p0 = grp[0].transform.position;
+            Vector2 p1 = grp[1].transform.position;
+            Vector2 mid = (p0 + p1) * 0.5f;
+            Vector2 dir = (p1 - p0).normalized;
+            grp[0].transform.position = (Vector3)(mid - dir * od * 0.5f);
+            grp[1].transform.position = (Vector3)(mid + dir * od * 0.5f);
         }
     }
 
@@ -409,9 +399,8 @@ public class GameManager : MonoBehaviour
     /// 2. Remove + Suck (0.53s) — balls disappear, pause before rotation
     /// 3. Combo check → rotation
     /// </summary>
-    public void StartMatchSequence(int matchCount, List<Ball> targets)
+    public void StartMatchSequence(int matchCount, List<Ball> targets, List<Ball> matchGrp, float coneBaseAngle, float coneAngle)
     {
-        // Score before highlight so HUD updates immediately
         int pts = matchCount >= 5 ? GameConstants.Score5Match :
                   matchCount == 4 ? GameConstants.Score4Match : GameConstants.Score3Match;
         score += targets.Count * pts;
@@ -419,25 +408,84 @@ public class GameManager : MonoBehaviour
 
         Debug.Log($"[GravityMatch] StartMatchSequence: {matchCount}-match, targets={targets.Count}");
         state = GameState.Highlight;
-        StartCoroutine(MatchSequenceCoroutine(matchCount, targets));
+        StartCoroutine(MatchSequenceCoroutine(matchCount, targets, matchGrp, coneBaseAngle, coneAngle));
     }
 
-    IEnumerator MatchSequenceCoroutine(int matchCount, List<Ball> targets)
+    IEnumerator MatchSequenceCoroutine(int matchCount, List<Ball> targets, List<Ball> matchGrp, float coneBaseAngle, float coneAngle)
     {
-        // Phase 1: Highlight — pulse matched balls so player sees the match
+        var matchIds = new HashSet<int>(matchGrp.Select(b => b.id));
+        bool hasCone = matchCount >= 4 && coneAngle > 0;
+
+        // Create highlight rings for each target ball
+        var rings = new List<GameObject>();
+        foreach (var b in targets)
+        {
+            if (b == null) continue;
+            var ring = new GameObject("HighlightRing");
+            ring.transform.SetParent(b.transform, false);
+            ring.transform.localPosition = Vector3.zero;
+            var sr = ring.AddComponent<SpriteRenderer>();
+            sr.sprite = b.GetComponent<SpriteRenderer>().sprite;
+            sr.sortingOrder = 15;
+            var mat = GameConstants.CreateUnlitSpriteMaterial();
+            if (mat != null) sr.material = mat;
+            rings.Add(ring);
+        }
+
+        // Create cone FX mesh if 4/5-match
+        GameObject coneFxGo = null;
+        if (hasCone)
+        {
+            coneFxGo = CreateConeFX(coneBaseAngle, coneAngle);
+        }
+
+        // Phase 1: Highlight — v21 style pulsing rings (22 frames ≈ 0.37s)
         float highlightEnd = Time.time + GameConstants.HighlightDuration;
         while (Time.time < highlightEnd)
         {
-            // Pulse: lerp between original color and white
-            float t = Mathf.PingPong((highlightEnd - Time.time) * 8f, 1f);
-            foreach (var b in targets)
+            float pulse = 0.5f + 0.5f * Mathf.Sin(Time.time * 12f);
+            // Subtle ring just outside the ball edge
+            float ringSize = (GameConstants.BallRadius + (0.015f + pulse * 0.01f) * GameConstants.WorldScale) * 2f;
+
+            for (int i = 0; i < rings.Count && i < targets.Count; i++)
             {
-                if (b == null) continue;
-                var sr = b.GetComponent<SpriteRenderer>();
-                if (sr != null) sr.color = Color.Lerp(b.ballColor, Color.white, t * 0.6f);
+                if (targets[i] == null || rings[i] == null) continue;
+                bool isMatch = matchIds.Contains(targets[i].id);
+                rings[i].transform.localScale = new Vector3(
+                    ringSize / targets[i].transform.localScale.x,
+                    ringSize / targets[i].transform.localScale.y, 1f);
+                var sr = rings[i].GetComponent<SpriteRenderer>();
+                // Use the ball's own color for the ring (brighter version)
+                Color ballCol = targets[i].ballColor;
+                float brightFactor = isMatch ? 1.3f : 1.1f;
+                Color ringCol = new Color(
+                    Mathf.Min(1f, ballCol.r * brightFactor),
+                    Mathf.Min(1f, ballCol.g * brightFactor),
+                    Mathf.Min(1f, ballCol.b * brightFactor),
+                    (isMatch ? 0.2f : 0.15f) + pulse * 0.25f
+                );
+                sr.color = ringCol;
             }
+
+            // Fade cone FX lines
+            if (coneFxGo != null)
+            {
+                float p = (highlightEnd - Time.time) / GameConstants.HighlightDuration;
+                foreach (var lr in coneFxGo.GetComponentsInChildren<LineRenderer>())
+                {
+                    Color c = lr.startColor;
+                    c.a = Mathf.Max(c.a, 0.01f) * p;
+                    lr.startColor = c;
+                    lr.endColor = new Color(c.r, c.g, c.b, c.a * 0.3f);
+                }
+            }
+
             yield return null;
         }
+
+        // Cleanup highlight FX
+        foreach (var ring in rings) if (ring != null) Destroy(ring);
+        if (coneFxGo != null) Destroy(coneFxGo);
 
         // Phase 2: Remove balls + suck pause
         state = GameState.Suck;
@@ -467,6 +515,63 @@ public class GameManager : MonoBehaviour
         ForceValidColors();
         ui.UpdateHUD(ballsLeft, score, balls.Count);
         StartRotation();
+    }
+
+    /// <summary>Create cone sweep FX using two LineRenderers for the edges.</summary>
+    GameObject CreateConeFX(float baseAngle, float halfAngle)
+    {
+        Vector2 bhPos = blackHole.position;
+        float radius = cam.orthographicSize * 2f;
+
+        var go = new GameObject("ConeFX");
+        go.transform.position = Vector3.zero;
+
+        var mat = GameConstants.CreateUnlitSpriteMaterial();
+
+        // Draw two edge lines from BH outward
+        for (int side = 0; side < 2; side++)
+        {
+            float angle = baseAngle + (side == 0 ? -halfAngle : halfAngle);
+            var lineGo = new GameObject($"ConeLine{side}");
+            lineGo.transform.SetParent(go.transform, false);
+            var lr = lineGo.AddComponent<LineRenderer>();
+            lr.useWorldSpace = true;
+            lr.startWidth = 0.015f * GameConstants.WorldScale;
+            lr.endWidth = 0.005f * GameConstants.WorldScale;
+            lr.startColor = new Color(1f, 1f, 1f, 0.35f);
+            lr.endColor = new Color(1f, 1f, 1f, 0f);
+            lr.sortingOrder = 8;
+            lr.positionCount = 2;
+            lr.SetPosition(0, (Vector3)bhPos);
+            lr.SetPosition(1, new Vector3(
+                bhPos.x + Mathf.Cos(angle) * radius,
+                bhPos.y + Mathf.Sin(angle) * radius, 0));
+            if (mat != null) lr.material = new Material(mat);
+        }
+
+        // Arc line along the outer edge
+        var arcGo = new GameObject("ConeArc");
+        arcGo.transform.SetParent(go.transform, false);
+        var arcLr = arcGo.AddComponent<LineRenderer>();
+        arcLr.useWorldSpace = true;
+        arcLr.startWidth = 0.01f * GameConstants.WorldScale;
+        arcLr.endWidth = 0.01f * GameConstants.WorldScale;
+        arcLr.startColor = new Color(1f, 1f, 1f, 0.2f);
+        arcLr.endColor = new Color(1f, 1f, 1f, 0.2f);
+        arcLr.sortingOrder = 8;
+        int arcSegments = 16;
+        arcLr.positionCount = arcSegments + 1;
+        float arcRadius = radius * 0.5f;
+        for (int i = 0; i <= arcSegments; i++)
+        {
+            float a = baseAngle - halfAngle + (2f * halfAngle * i / arcSegments);
+            arcLr.SetPosition(i, new Vector3(
+                bhPos.x + Mathf.Cos(a) * arcRadius,
+                bhPos.y + Mathf.Sin(a) * arcRadius, 0));
+        }
+        if (mat != null) arcLr.material = new Material(mat);
+
+        return go;
     }
 
     // ===== ROTATION =====

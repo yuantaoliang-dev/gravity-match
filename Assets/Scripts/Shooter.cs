@@ -6,7 +6,6 @@ public class Shooter : MonoBehaviour
 {
     [Header("References")]
     public GameManager gm;
-    public LineRenderer trajectoryLine;
     public LineRenderer aimLine;
     public SpriteRenderer currentBallDisplay;
     public SpriteRenderer nextBallDisplay;
@@ -20,8 +19,10 @@ public class Shooter : MonoBehaviour
     private bool aiming;
     private Vector2 aimDir;
 
-    // Trajectory simulation buffer (reused to avoid GC)
-    private List<Vector3> trajPoints = new List<Vector3>(256);
+    // Trajectory dot pool (v21 style: small circles with fading alpha)
+    private const int MaxTrajDots = 100;
+    private List<SpriteRenderer> trajDots = new List<SpriteRenderer>();
+    private List<Vector2> trajPoints = new List<Vector2>(400);
 
     void Start()
     {
@@ -70,7 +71,7 @@ public class Shooter : MonoBehaviour
         }
 
         // Create trajectory LineRenderer programmatically
-        CreateTrajectoryLine(mat);
+        CreateTrajectoryDots(mat);
         CreateAimLine(mat);
     }
 
@@ -82,20 +83,26 @@ public class Shooter : MonoBehaviour
         return mat;
     }
 
-    void CreateTrajectoryLine(Material baseMat)
+    void CreateTrajectoryDots(Material baseMat)
     {
-        var go = new GameObject("TrajectoryLine");
-        go.transform.SetParent(transform, false);
-        trajectoryLine = go.AddComponent<LineRenderer>();
-        trajectoryLine.useWorldSpace = true;
-        trajectoryLine.startWidth = 0.03f * GameConstants.WorldScale;
-        trajectoryLine.endWidth = 0.01f * GameConstants.WorldScale;
-        trajectoryLine.startColor = new Color(1f, 1f, 1f, 0.45f);
-        trajectoryLine.endColor = new Color(1f, 1f, 1f, 0.05f);
-        trajectoryLine.sortingOrder = 10;
-        trajectoryLine.numCapVertices = 2;
-        trajectoryLine.positionCount = 0;
-        trajectoryLine.material = CreateLineMaterial();
+        // v21 style: pool of small dot sprites, positioned along trajectory
+        Sprite dotSprite = currentBallDisplay ? currentBallDisplay.sprite : null;
+        float dotSize = 0.025f * GameConstants.WorldScale; // v21: radius 1.2px
+        var parent = new GameObject("TrajectoryDots");
+        parent.transform.SetParent(transform, false);
+
+        for (int i = 0; i < MaxTrajDots; i++)
+        {
+            var go = new GameObject($"Dot{i}");
+            go.transform.SetParent(parent.transform, false);
+            go.transform.localScale = new Vector3(dotSize, dotSize, 1f);
+            var sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = dotSprite;
+            sr.sortingOrder = 10;
+            if (baseMat != null) sr.material = new Material(baseMat);
+            go.SetActive(false);
+            trajDots.Add(sr);
+        }
     }
 
     void CreateAimLine(Material baseMat)
@@ -293,26 +300,35 @@ public class Shooter : MonoBehaviour
                         }
                     }
 
-                    Vector2 newPos;
-                    if (secondHit != null)
+                    // Placement distance depends on color match:
+                    // Same color → OverlapDistance (visual overlap)
+                    // Different color → just touching, no visual overlap
+                    float diffColorDist = GameConstants.MinVisDist;
+                    bool sameColorHit = (hitBall.ballColor == projColor);
+                    float placeDist = sameColorHit ? od : diffColorDist;
+                    Vector2 approachDir = (pos - hitCenter).normalized;
+                    Vector2 newPos = hitCenter + approachDir * placeDist;
+
+                    // Slide-through: only if second ball is same color AND
+                    // hitBall and secondHit are in DIFFERENT groups (not already
+                    // connected). This ensures slide-through only triggers for
+                    // bridging separate groups (4/5-match), not for 3-match pairs.
+                    if (secondHit != null && secondHit.ballColor == projColor)
                     {
-                        // Second ball found: stop at contact with second ball.
-                        // Place at OverlapDistance from second ball (approach side).
-                        // This naturally places the new ball BETWEEN the two balls.
-                        Vector2 contactPos = pos + vel * secondHitT;
-                        Vector2 dirFromSecond = (contactPos - (Vector2)secondHit.transform.position).normalized;
-                        newPos = (Vector2)secondHit.transform.position + dirFromSecond * od;
-                        Debug.Log($"[GravityMatch] Second hit found: placing between hitBall and secondHit");
-                    }
-                    else
-                    {
-                        // No second ball: stop at first contact point (approach side)
-                        Vector2 approachDir = (pos - hitCenter).normalized;
-                        newPos = hitCenter + approachDir * od;
+                        var hitGroup = gm.FindGroup(hitBall, GameConstants.MatchTouchDist);
+                        bool alreadyConnected = hitGroup.Any(b => b.id == secondHit.id);
+                        if (!alreadyConnected)
+                        {
+                            Vector2 contactPos = pos + vel * secondHitT;
+                            Vector2 dirFromSecond = (contactPos - (Vector2)secondHit.transform.position).normalized;
+                            newPos = (Vector2)secondHit.transform.position + dirFromSecond * od;
+                            Debug.Log($"[GravityMatch] Slide-through: bridging separate groups");
+                        }
                     }
 
                     // Push away from other balls
-                    float pushThreshold = od - 0.005f * GameConstants.WorldScale;
+                    // Same color: use OverlapDistance (allow overlap)
+                    // Different color: use MinVisDist (no visual overlap)
                     float pushNudge = 0.002f * GameConstants.WorldScale;
                     for (int it = 0; it < 30; it++)
                     {
@@ -322,10 +338,12 @@ public class Shooter : MonoBehaviour
                             if (b2.id == hitBall.id) continue;
                             if (secondHit != null && b2.id == secondHit.id) continue;
                             float d2 = Vector2.Distance(newPos, b2.transform.position);
-                            if (d2 < pushThreshold)
+                            bool sameColor = b2.ballColor == projColor;
+                            float pushDist = sameColor ? (od - 0.005f * GameConstants.WorldScale) : diffColorDist;
+                            if (d2 < pushDist)
                             {
                                 Vector2 pDir = (newPos - (Vector2)b2.transform.position).normalized;
-                                newPos += pDir * (od - d2 + pushNudge);
+                                newPos += pDir * (pushDist - d2 + pushNudge);
                                 pushed = true;
                             }
                         }
@@ -397,10 +415,14 @@ public class Shooter : MonoBehaviour
                 var coneExtra = gm.Balls.Where(b => hitIds.Contains(b.id)).ToList();
                 allTargets.AddRange(coneExtra);
                 Debug.Log($"[GravityMatch] Cone sweep: {grp.Count}-match, colorOnly={colorOnly}, coneExtra={coneExtra.Count}, totalTargets={allTargets.Count}");
+
+                // Pass cone info for visual FX
+                gm.StartMatchSequence(grp.Count, allTargets, grp, baseAngle, coneAngle);
+                return;
             }
 
-            // Pass targets to GameManager for highlight → remove → rotate sequence
-            gm.StartMatchSequence(grp.Count, allTargets);
+            // 3-match (no cone)
+            gm.StartMatchSequence(grp.Count, allTargets, grp, 0, 0);
         }
         else
         {
@@ -409,26 +431,27 @@ public class Shooter : MonoBehaviour
         }
     }
 
-    // ===== TRAJECTORY PREVIEW =====
+    // ===== TRAJECTORY PREVIEW (v21 style: dotted path) =====
     void ShowTrajectory(Vector2 start, Vector2 vel)
     {
-        if (trajectoryLine == null) return;
-
+        // Simulate trajectory matching v21: half-speed steps, stop at ball/BH
         trajPoints.Clear();
         Vector2 pos = start;
-        Vector2 v = vel;
+        Vector2 dir = vel.normalized;
+        // v21 step: BSPD*0.5 pixels = 2.25px → world units
+        float stepDist = 0.0225f * GameConstants.WorldScale;
+        Vector2 v = dir * stepDist;
         int bounces = 0;
-        float dt = 1f / 60f;
         float hh = Camera.main.orthographicSize;
         float hw = hh * Camera.main.aspect;
         float r = GameConstants.BallRadius;
+        float hd = GameConstants.HitDetectDist;
         Vector2 bhPos = gm.blackHole.position;
         float shooterY = transform.position.y;
 
-        for (int i = 0; i < GameConstants.TrajectoryMaxDots; i++)
+        for (int i = 0; i < 400; i++) // v21 max 400 steps
         {
-            trajPoints.Add(pos);
-            pos += v * dt;
+            pos += v;
 
             // Wall bounces
             if (pos.x - r <= -hw) { pos.x = -hw + r; v.x *= -1; bounces++; }
@@ -437,17 +460,42 @@ public class Shooter : MonoBehaviour
 
             // Stop conditions
             if (bounces > GameConstants.MaxBounces) break;
-            if (pos.y < shooterY - 0.2f) break;
-            if (Vector2.Distance(pos, bhPos) < gm.BHEventHorizon) { trajPoints.Add(pos); break; }
+            if (pos.y < shooterY - 0.1f) break;
+            if (Vector2.Distance(pos, bhPos) < gm.BHEventHorizon) break;
+
+            // Stop at ball hit (v21: dist < BR*1.7)
+            bool hitBall = false;
+            foreach (var b in gm.Balls)
+            {
+                if (Vector2.Distance(pos, b.transform.position) < hd) { hitBall = true; break; }
+            }
+            if (hitBall) break;
+
+            trajPoints.Add(pos);
         }
 
-        trajectoryLine.positionCount = trajPoints.Count;
-        trajectoryLine.SetPositions(trajPoints.ToArray());
+        // Render as dots: every other point, fading alpha (v21 line 716-719)
+        int dotIdx = 0;
+        int show = Mathf.Min(trajPoints.Count, GameConstants.TrajectoryMaxDots);
+        for (int i = 0; i < show && dotIdx < MaxTrajDots; i += 2)
+        {
+            var dot = trajDots[dotIdx];
+            dot.gameObject.SetActive(true);
+            dot.transform.position = (Vector3)trajPoints[i];
+            // v21: alpha = max(0.05, (1 - i/show) * 0.35)
+            float alpha = Mathf.Max(0.05f, (1f - (float)i / show) * 0.35f);
+            dot.color = new Color(1f, 1f, 1f, alpha);
+            dotIdx++;
+        }
+        // Hide unused dots
+        for (int i = dotIdx; i < MaxTrajDots; i++)
+            trajDots[i].gameObject.SetActive(false);
     }
 
     void HideTrajectory()
     {
-        if (trajectoryLine) trajectoryLine.positionCount = 0;
+        for (int i = 0; i < trajDots.Count; i++)
+            trajDots[i].gameObject.SetActive(false);
     }
 
     void ShowAimLine(Vector2 start, Vector2 dir)

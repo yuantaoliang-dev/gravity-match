@@ -18,6 +18,7 @@ public class Ball : MonoBehaviour
         this.ballColor = color;
         if (sr == null) sr = GetComponent<SpriteRenderer>();
         sr.color = color;
+        sr.sortingOrder = 2;
 
         // Force correct visual scale (prefab scale may not match WorldScale)
         float diam = GameConstants.BallRadius * 2f;
