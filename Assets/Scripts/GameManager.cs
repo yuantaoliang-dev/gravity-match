@@ -266,14 +266,25 @@ public class GameManager : MonoBehaviour
 
     void ClampBallPosition(Ball b)
     {
-        // TODO: clamp to camera bounds
+        Vector2 pos = b.transform.position;
+        float r = GameConstants.BallRadius;
+
+        // Clamp to camera bounds (v21: WALL_L+BR to WALL_R-BR)
+        float hh = cam.orthographicSize;
+        float hw = hh * cam.aspect;
+        pos.x = Mathf.Clamp(pos.x, -hw + r, hw - r);
+        pos.y = Mathf.Clamp(pos.y, -hh + r, hh - r);
+
+        // Keep away from BH
         Vector2 center = blackHole.position;
-        float dist = b.DistTo(center);
-        if (dist < BHEventHorizon + GameConstants.BallRadius + 0.02f * GameConstants.WorldScale)
+        float dist = Vector2.Distance(pos, center);
+        if (dist < BHEventHorizon + r + 0.02f * GameConstants.WorldScale)
         {
-            Vector2 dir = ((Vector2)b.transform.position - center).normalized;
-            b.transform.position = center + dir * (BHEventHorizon + GameConstants.BallRadius + 0.03f * GameConstants.WorldScale);
+            Vector2 dir = (pos - center).normalized;
+            pos = center + dir * (BHEventHorizon + r + 0.03f * GameConstants.WorldScale);
         }
+
+        b.transform.position = pos;
     }
 
     // ===== BALL MANAGEMENT =====
