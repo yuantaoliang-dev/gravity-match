@@ -105,57 +105,55 @@ public class UIManager : MonoBehaviour
             var rt = levelNameText.GetComponent<RectTransform>();
             rt.anchorMin = new Vector2(0.5f, 1f);
             rt.anchorMax = new Vector2(0.5f, 1f);
-            rt.anchoredPosition = new Vector2(0, -12);
-            rt.sizeDelta = new Vector2(300, 24);
-            levelNameText.fontSize = 14;
+            rt.anchoredPosition = new Vector2(0, -8);
+            rt.sizeDelta = new Vector2(200, 20);
+            levelNameText.fontSize = 12;
             levelNameText.fontStyle = FontStyles.Bold;
             levelNameText.alignment = TextAlignmentOptions.Center;
         }
 
-        // Balls count: top-left
-        if (ballsText)
-        {
-            var rt = ballsText.GetComponent<RectTransform>();
-            rt.anchorMin = new Vector2(0, 1);
-            rt.anchorMax = new Vector2(0, 1);
-            rt.anchoredPosition = new Vector2(40, -35);
-            rt.sizeDelta = new Vector2(70, 24);
-            ballsText.fontSize = 16;
-            ballsText.fontStyle = FontStyles.Bold;
-            ballsText.alignment = TextAlignmentOptions.Center;
-        }
-
-        // Score: top-center
-        if (scoreText)
-        {
-            var rt = scoreText.GetComponent<RectTransform>();
-            rt.anchorMin = new Vector2(0.5f, 1);
-            rt.anchorMax = new Vector2(0.5f, 1);
-            rt.anchoredPosition = new Vector2(0, -35);
-            rt.sizeDelta = new Vector2(100, 24);
-            scoreText.fontSize = 16;
-            scoreText.fontStyle = FontStyles.Bold;
-            scoreText.alignment = TextAlignmentOptions.Center;
-        }
-
-        // Targets: top-right (below Levels button)
-        if (targetsText)
-        {
-            var rt = targetsText.GetComponent<RectTransform>();
-            rt.anchorMin = new Vector2(1, 1);
-            rt.anchorMax = new Vector2(1, 1);
-            rt.anchoredPosition = new Vector2(-35, -35);
-            rt.sizeDelta = new Vector2(70, 24);
-            targetsText.fontSize = 16;
-            targetsText.fontStyle = FontStyles.Bold;
-            targetsText.alignment = TextAlignmentOptions.Center;
-        }
+        // v21 HUD: label on top, value below. Left=balls, Center=score, Right=targets
+        SetupHUDItem(ballsText, "balls", 0f, 1f, 40f);
+        SetupHUDItem(scoreText, "score", 0.5f, 0.5f, 0f);
+        SetupHUDItem(targetsText, "targets", 1f, 0f, -40f);
 
         // Remaining count: hide (duplicate of ballsText)
         if (remainingCount && remainingCount != ballsText)
         {
             remainingCount.gameObject.SetActive(false);
         }
+    }
+
+    void SetupHUDItem(TextMeshProUGUI valueText, string label, float anchorX, float anchorXMax, float offsetX)
+    {
+        if (valueText == null) return;
+        var canvas = GetComponentInParent<Canvas>();
+        if (canvas == null) canvas = FindFirstObjectByType<Canvas>();
+
+        // Value text
+        var rt = valueText.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(anchorX, 1);
+        rt.anchorMax = new Vector2(anchorX, 1);
+        rt.anchoredPosition = new Vector2(offsetX, -35);
+        rt.sizeDelta = new Vector2(70, 18);
+        valueText.fontSize = 14;
+        valueText.fontStyle = FontStyles.Bold;
+        valueText.alignment = TextAlignmentOptions.Center;
+
+        // Label above value (v21: small monospace label)
+        var labelGo = new GameObject($"Label_{label}");
+        labelGo.transform.SetParent(canvas.transform, false);
+        var labelRT = labelGo.AddComponent<RectTransform>();
+        labelRT.anchorMin = new Vector2(anchorX, 1);
+        labelRT.anchorMax = new Vector2(anchorX, 1);
+        labelRT.anchoredPosition = new Vector2(offsetX, -23);
+        labelRT.sizeDelta = new Vector2(70, 14);
+        var labelText = labelGo.AddComponent<TextMeshProUGUI>();
+        labelText.text = label;
+        labelText.fontSize = 9;
+        labelText.alignment = TextAlignmentOptions.Center;
+        labelText.color = new Color(1, 1, 1, 0.4f); // v21: rgba(255,255,255,0.4)
+        labelText.raycastTarget = false;
     }
 
     void SetupOverlayLayout()
@@ -326,14 +324,14 @@ public class UIManager : MonoBehaviour
         if (canvas == null) canvas = FindFirstObjectByType<Canvas>();
         if (canvas == null) return;
 
-        // "Levels" button next to level name (top, right of center)
+        // "Levels" button at top-left corner
         var btnGo = new GameObject("LevelsButton");
         btnGo.transform.SetParent(canvas.transform, false);
         var btnRT = btnGo.AddComponent<RectTransform>();
-        btnRT.anchorMin = new Vector2(1, 1);
-        btnRT.anchorMax = new Vector2(1, 1);
-        btnRT.anchoredPosition = new Vector2(-35, -12);
-        btnRT.sizeDelta = new Vector2(50, 20);
+        btnRT.anchorMin = new Vector2(0, 1);
+        btnRT.anchorMax = new Vector2(0, 1);
+        btnRT.anchoredPosition = new Vector2(30, -8);
+        btnRT.sizeDelta = new Vector2(50, 18);
 
         var btnImg = btnGo.AddComponent<Image>();
         btnImg.color = new Color(1, 1, 1, 0.1f);
@@ -367,7 +365,7 @@ public class UIManager : MonoBehaviour
         panelRT.offsetMax = Vector2.zero;
 
         var panelImg = levelSelectPanel.AddComponent<Image>();
-        panelImg.color = new Color(0, 0, 0, 0.85f);
+        panelImg.color = new Color(0.04f, 0.05f, 0.08f, 1f); // solid background matching game bg
 
         levelSelectPanel.SetActive(false);
     }
