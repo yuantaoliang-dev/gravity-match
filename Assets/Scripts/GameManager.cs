@@ -866,7 +866,8 @@ public class GameManager : MonoBehaviour
             score += remBonus;
             int stars = score >= lv.starScore3 ? 3 : score >= lv.starScore2 ? 2 : 1;
             levelStars[currentLevel] = Mathf.Max(levelStars[currentLevel], stars);
-            ui.ShowWin(stars, score, ballsLeft);
+            bool hasNext = currentLevel < levels.Count - 1;
+            ui.ShowWin(stars, score, ballsLeft, hasNext);
         }
         else if (ballsLeft <= 0 && !shooter.HasProjectile && !isRotating)
         {
