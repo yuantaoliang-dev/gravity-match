@@ -855,9 +855,10 @@ public class GameManager : MonoBehaviour
     }
 
     // ===== WIN/LOSE =====
+    // v21: only checks during 'play' state, not during rotation or pending match
     void CheckEnd()
     {
-        if (state != GameState.Play && state != GameState.Rotating) return;
+        if (state != GameState.Play) return;
         if (balls.Count == 0)
         {
             state = GameState.Won;
@@ -869,7 +870,7 @@ public class GameManager : MonoBehaviour
             bool hasNext = currentLevel < levels.Count - 1;
             ui.ShowWin(stars, score, ballsLeft, hasNext);
         }
-        else if (ballsLeft <= 0 && !shooter.HasProjectile && !isRotating)
+        else if (ballsLeft <= 0 && !shooter.HasProjectile)
         {
             state = GameState.Lost;
             ui.ShowLose(balls.Count);

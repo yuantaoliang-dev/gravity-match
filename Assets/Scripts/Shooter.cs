@@ -309,11 +309,10 @@ public class Shooter : MonoBehaviour
                     Vector2 approachDir = (pos - hitCenter).normalized;
                     Vector2 newPos = hitCenter + approachDir * placeDist;
 
-                    // Slide-through: only if second ball is same color AND
-                    // hitBall and secondHit are in DIFFERENT groups (not already
-                    // connected). This ensures slide-through only triggers for
-                    // bridging separate groups (4/5-match), not for 3-match pairs.
-                    if (secondHit != null && secondHit.ballColor == projColor)
+                    // Slide-through: only when BOTH hitBall and secondHit are
+                    // same color as projectile, and they're in different groups.
+                    // If hitBall is different color, always stop at first contact.
+                    if (sameColorHit && secondHit != null && secondHit.ballColor == projColor)
                     {
                         var hitGroup = gm.FindGroup(hitBall, GameConstants.MatchTouchDist);
                         bool alreadyConnected = hitGroup.Any(b => b.id == secondHit.id);
@@ -513,13 +512,25 @@ public class Shooter : MonoBehaviour
 
     void UpdateDisplay()
     {
-        if (currentBallDisplay) currentBallDisplay.color = gm.currentColor;
+        // Hide current ball when no balls left
+        if (currentBallDisplay)
+        {
+            bool showCurrent = gm.ballsLeft > 0 || projectile != null;
+            currentBallDisplay.gameObject.SetActive(showCurrent);
+            if (showCurrent) currentBallDisplay.color = gm.currentColor;
+        }
+
+        // Hide next ball when 1 or fewer balls left
         if (nextBallDisplay)
         {
-            // HTML: next ball drawn at globalAlpha=0.5
-            Color nc = gm.nextColor;
-            nc.a = 0.5f;
-            nextBallDisplay.color = nc;
+            bool showNext = gm.ballsLeft > 1;
+            nextBallDisplay.gameObject.SetActive(showNext);
+            if (showNext)
+            {
+                Color nc = gm.nextColor;
+                nc.a = 0.5f;
+                nextBallDisplay.color = nc;
+            }
         }
     }
 }
