@@ -457,6 +457,19 @@ public class GameManager : MonoBehaviour
         ui.UpdateHUD(ballsLeft, score, balls.Count);
 
         Debug.Log($"[GravityMatch] StartMatchSequence: {matchCount}-match, targets={targets.Count}");
+
+        // Show reward text for 4/5-match, color = matched ball color brightened
+        if (matchCount >= 4 && matchGrp.Count > 0)
+        {
+            Color bc = matchGrp[0].ballColor;
+            Color bright = new Color(
+                Mathf.Min(1f, bc.r * 1.4f + 0.2f),
+                Mathf.Min(1f, bc.g * 1.4f + 0.2f),
+                Mathf.Min(1f, bc.b * 1.4f + 0.2f));
+            string msg = matchCount >= 5 ? "5+ MATCH!" : "4 MATCH!";
+            ui.ShowReward(msg, bright);
+        }
+
         state = GameState.Highlight;
         StartCoroutine(MatchSequenceCoroutine(matchCount, targets, matchGrp, coneBaseAngle, coneAngle));
     }
@@ -560,6 +573,8 @@ public class GameManager : MonoBehaviour
             {
                 comboCount = 0;
                 ComboBonus();
+                // v21: showRw('3× COMBO! +300', '#FFE66D')
+                ui.ShowReward("3x COMBO! +300", new Color(1f, 0.9f, 0.43f));
                 // Wait for buddy FX to show
                 state = GameState.Buddy;
                 yield return new WaitForSeconds(GameConstants.BuddyFXDuration);
@@ -881,6 +896,7 @@ public class GameManager : MonoBehaviour
     public List<Ball> Balls => balls;
     public bool IsRotating => isRotating;
     public int[] LevelStars => levelStars;
+    public int LevelCount => levels.Count;
     public void Restart() => LoadLevel(currentLevel);
     public void NextLevel() { if (currentLevel < levels.Count - 1) LoadLevel(currentLevel + 1); }
 }

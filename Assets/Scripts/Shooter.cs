@@ -25,6 +25,11 @@ public class Shooter : MonoBehaviour
     private List<SpriteRenderer> trajDots = new List<SpriteRenderer>();
     private List<Vector2> trajPoints = new List<Vector2>(400);
 
+    // Combo display (right side of shooter)
+    private GameObject comboDisplay;
+    private TMPro.TextMeshPro comboText;
+    private SpriteRenderer[] comboDots = new SpriteRenderer[3];
+
     void Start()
     {
         var mat = GameConstants.CreateUnlitSpriteMaterial();
@@ -74,6 +79,72 @@ public class Shooter : MonoBehaviour
         // Create trajectory LineRenderer programmatically
         CreateTrajectoryDots(mat);
         CreateAimLine(mat);
+        CreateComboDisplay(mat);
+    }
+
+    void CreateComboDisplay(Material mat)
+    {
+        // v21: combo counter at SX + BR*7, SY (right of shooter)
+        float br = GameConstants.BallRadius;
+        comboDisplay = new GameObject("ComboDisplay");
+        comboDisplay.transform.SetParent(transform, false);
+        comboDisplay.transform.localPosition = new Vector3(br * 7f, 0, 0);
+
+        // "COMBO" text
+        var textGo = new GameObject("ComboText");
+        textGo.transform.SetParent(comboDisplay.transform, false);
+        textGo.transform.localPosition = new Vector3(0, 0.02f, 0);
+        comboText = textGo.AddComponent<TMPro.TextMeshPro>();
+        comboText.text = "COMBO";
+        comboText.fontSize = 0.8f;
+        comboText.fontStyle = TMPro.FontStyles.Bold;
+        comboText.alignment = TMPro.TextAlignmentOptions.Center;
+        comboText.sortingOrder = 10;
+        var textRT = textGo.GetComponent<RectTransform>();
+        textRT.sizeDelta = new Vector2(0.4f, 0.1f);
+
+        // 3 progress dots
+        Sprite dotSprite = currentBallDisplay ? currentBallDisplay.sprite : null;
+        float dotSize = 0.04f * GameConstants.WorldScale;
+        float dotSpacing = 0.06f * GameConstants.WorldScale;
+        for (int i = 0; i < 3; i++)
+        {
+            var dotGo = new GameObject($"ComboDot{i}");
+            dotGo.transform.SetParent(comboDisplay.transform, false);
+            dotGo.transform.localPosition = new Vector3(
+                (i - 1) * dotSpacing, -0.04f, 0);
+            dotGo.transform.localScale = new Vector3(dotSize, dotSize, 1f);
+            var sr = dotGo.AddComponent<SpriteRenderer>();
+            sr.sprite = dotSprite;
+            sr.sortingOrder = 10;
+            if (mat != null) sr.material = new Material(mat);
+            comboDots[i] = sr;
+        }
+
+        comboDisplay.SetActive(false);
+    }
+
+    void UpdateComboDisplay()
+    {
+        int count = gm.comboCount;
+        if (count <= 0)
+        {
+            if (comboDisplay) comboDisplay.SetActive(false);
+            return;
+        }
+
+        comboDisplay.SetActive(true);
+        // v21: comboCount >= 2 → amber, else half-transparent white
+        Color activeCol = count >= 2
+            ? new Color(0.937f, 0.624f, 0.153f, 1f) // #EF9F27
+            : new Color(1f, 1f, 1f, 0.5f);
+        Color inactiveCol = new Color(1f, 1f, 1f, 0.1f);
+
+        comboText.color = activeCol;
+        for (int i = 0; i < 3; i++)
+        {
+            comboDots[i].color = i < count ? activeCol : inactiveCol;
+        }
     }
 
     static Material CreateLineMaterial()
@@ -123,8 +194,9 @@ public class Shooter : MonoBehaviour
 
     void Update()
     {
-        // Always update ball color display (so it refreshes immediately after firing)
+        // Always update ball color display and combo counter
         UpdateDisplay();
+        UpdateComboDisplay();
 
         if (gm.state != GameManager.GameState.Play) return;
         if (projectile != null)
