@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -139,6 +140,10 @@ public class Shooter : MonoBehaviour
     void HandleInput()
     {
         if (gm.IsRotating) return;
+
+        // Ignore clicks on UI elements (buttons, panels)
+        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            return;
 
         // Mouse/touch: press to aim, release to fire
         if (Input.GetMouseButtonDown(0))
