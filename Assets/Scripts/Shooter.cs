@@ -346,11 +346,9 @@ public class Shooter : MonoBehaviour
                     float od = GameConstants.OverlapDistance;
                     float hd = GameConstants.HitDetectDist;
 
-                    // Look-ahead: would the projectile hit a SECOND ball if
-                    // it continued flying through the first?
-                    // Ray-cast along trajectory, find closest other ball hit
-                    // within a reasonable travel distance.
-                    float maxTravel = od * 3f;
+                    // Look-ahead: continue flying only 1/3 ball diameter past
+                    // the first hit point to check for a second ball.
+                    float maxTravel = GameConstants.BallRadius * 2f / 3f;
                     Ball secondHit = null;
                     float secondHitT = float.MaxValue;
 
