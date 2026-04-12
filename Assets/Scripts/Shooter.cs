@@ -303,7 +303,7 @@ public class Shooter : MonoBehaviour
                     // Placement distance depends on color match:
                     // Same color → OverlapDistance (visual overlap)
                     // Different color → just touching, no visual overlap
-                    float diffColorDist = GameConstants.MinVisDist;
+                    float diffColorDist = GameConstants.BallRadius * 2f;
                     bool sameColorHit = (hitBall.ballColor == projColor);
                     float placeDist = sameColorHit ? od : diffColorDist;
                     Vector2 approachDir = (pos - hitCenter).normalized;

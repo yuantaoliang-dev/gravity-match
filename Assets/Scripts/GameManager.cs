@@ -291,10 +291,60 @@ public class GameManager : MonoBehaviour
         foreach (var b in list)
         {
             balls.Remove(b);
-            b.gameObject.SetActive(false); // hide immediately this frame
-            Destroy(b.gameObject);         // cleanup next frame
+            SpawnSuckGhost(b); // v21 suck FX: ghost slides toward BH
+            b.gameObject.SetActive(false);
+            Destroy(b.gameObject);
         }
         bhAte += list.Count;
+    }
+
+    /// <summary>
+    /// v21 suckBall: ghost sprite slides toward BH, shrinking + fading.
+    /// Duration = SuckDuration * 1.5 so animation extends slightly past the wait.
+    /// </summary>
+    void SpawnSuckGhost(Ball b)
+    {
+        var go = new GameObject("SuckGhost");
+        go.transform.position = b.transform.position;
+        var sr = go.AddComponent<SpriteRenderer>();
+        sr.sprite = b.GetComponent<SpriteRenderer>().sprite;
+        sr.color = b.ballColor;
+        sr.sortingOrder = 5;
+        var mat = GameConstants.CreateUnlitSpriteMaterial();
+        if (mat != null) sr.material = mat;
+        float diam = GameConstants.BallRadius * 2f;
+        go.transform.localScale = new Vector3(diam, diam, 1f);
+        StartCoroutine(AnimateSuckGhost(go, sr, b.ballColor));
+    }
+
+    IEnumerator AnimateSuckGhost(GameObject go, SpriteRenderer sr, Color color)
+    {
+        Vector2 bhPos = blackHole.position;
+        float duration = GameConstants.SuckDuration * 1.5f;
+        float br = GameConstants.BallRadius;
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            if (go == null) yield break;
+            float p = 1f - elapsed / duration; // 1 → 0
+
+            // Slide toward BH
+            Vector2 pos = go.transform.position;
+            pos += (bhPos - pos) * 0.04f;
+            go.transform.position = (Vector3)pos;
+
+            // Shrink: v21 radius = BR * (p*0.7 + 0.3)
+            float scale = (p * 0.7f + 0.3f) * br * 2f;
+            go.transform.localScale = new Vector3(scale, scale, 1f);
+
+            // Fade out
+            sr.color = new Color(color.r, color.g, color.b, p);
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+        Destroy(go);
     }
 
     // ===== MATCHING =====
@@ -467,16 +517,21 @@ public class GameManager : MonoBehaviour
                 sr.color = ringCol;
             }
 
-            // Fade cone FX lines
+            // Fade cone FX (update vertex alpha for mesh)
             if (coneFxGo != null)
             {
-                float p = (highlightEnd - Time.time) / GameConstants.HighlightDuration;
-                foreach (var lr in coneFxGo.GetComponentsInChildren<LineRenderer>())
+                float cp = (highlightEnd - Time.time) / GameConstants.HighlightDuration;
+                var mf = coneFxGo.GetComponent<MeshFilter>();
+                if (mf != null && mf.mesh != null)
                 {
-                    Color c = lr.startColor;
-                    c.a = Mathf.Max(c.a, 0.01f) * p;
-                    lr.startColor = c;
-                    lr.endColor = new Color(c.r, c.g, c.b, c.a * 0.3f);
+                    var cols = mf.mesh.colors32;
+                    // Center vertex (index 0): bright
+                    cols[0] = new Color32(255, 255, 255, (byte)(cp * 90));
+                    // Mid ring (index 1..arcSegs+1): medium
+                    // Outer ring (rest): zero
+                    for (int ci = 1; ci < cols.Length; ci++)
+                        cols[ci] = new Color32(255, 255, 255, (byte)(cols[ci].a > 0 ? cp * cols[ci].a : 0));
+                    mf.mesh.colors32 = cols;
                 }
             }
 
@@ -520,59 +575,76 @@ public class GameManager : MonoBehaviour
         StartRotation();
     }
 
-    /// <summary>Create cone sweep FX using two LineRenderers for the edges.</summary>
+    /// <summary>
+    /// v21 flashlight cone: filled wedge mesh with radial gradient.
+    /// Center bright, 30% radius medium, outer edge transparent.
+    /// </summary>
     GameObject CreateConeFX(float baseAngle, float halfAngle)
     {
         Vector2 bhPos = blackHole.position;
-        float radius = cam.orthographicSize * 2f;
+        float outerR = cam.orthographicSize * 2f;
+        float midR = outerR * 0.3f; // v21: gradient stop at 30%
+        int arcSegs = 16;
 
         var go = new GameObject("ConeFX");
-        go.transform.position = Vector3.zero;
+        go.transform.position = new Vector3(bhPos.x, bhPos.y, 0);
 
+        // Mesh: center(1) + mid ring(arcSegs+1) + outer ring(arcSegs+1)
+        int midStart = 1;
+        int outerStart = midStart + arcSegs + 1;
+        int vertCount = 1 + (arcSegs + 1) * 2;
+        var verts = new Vector3[vertCount];
+        var colors = new Color32[vertCount];
+
+        // Center vertex: bright white
+        verts[0] = Vector3.zero;
+        colors[0] = new Color32(255, 255, 255, 90); // v21: p*0.35 ≈ 90/255
+
+        for (int i = 0; i <= arcSegs; i++)
+        {
+            float a = baseAngle - halfAngle + (2f * halfAngle * i / arcSegs);
+            float cos = Mathf.Cos(a);
+            float sin = Mathf.Sin(a);
+
+            // Mid ring: medium brightness
+            verts[midStart + i] = new Vector3(cos * midR, sin * midR, 0);
+            colors[midStart + i] = new Color32(255, 255, 255, 38); // v21: p*0.15 ≈ 38/255
+
+            // Outer ring: transparent
+            verts[outerStart + i] = new Vector3(cos * outerR, sin * outerR, 0);
+            colors[outerStart + i] = new Color32(255, 255, 255, 0);
+        }
+
+        // Triangles: center→mid fan, then mid→outer strip
+        var tris = new List<int>();
+        for (int i = 0; i < arcSegs; i++)
+        {
+            // Center to mid ring fan
+            tris.Add(0);
+            tris.Add(midStart + i);
+            tris.Add(midStart + i + 1);
+
+            // Mid to outer ring strip (two triangles per segment)
+            tris.Add(midStart + i);
+            tris.Add(outerStart + i);
+            tris.Add(outerStart + i + 1);
+
+            tris.Add(midStart + i);
+            tris.Add(outerStart + i + 1);
+            tris.Add(midStart + i + 1);
+        }
+
+        var mesh = new Mesh();
+        mesh.vertices = verts;
+        mesh.triangles = tris.ToArray();
+        mesh.colors32 = colors;
+
+        var mf = go.AddComponent<MeshFilter>();
+        mf.mesh = mesh;
+        var mr = go.AddComponent<MeshRenderer>();
         var mat = GameConstants.CreateUnlitSpriteMaterial();
-
-        // Draw two edge lines from BH outward
-        for (int side = 0; side < 2; side++)
-        {
-            float angle = baseAngle + (side == 0 ? -halfAngle : halfAngle);
-            var lineGo = new GameObject($"ConeLine{side}");
-            lineGo.transform.SetParent(go.transform, false);
-            var lr = lineGo.AddComponent<LineRenderer>();
-            lr.useWorldSpace = true;
-            lr.startWidth = 0.015f * GameConstants.WorldScale;
-            lr.endWidth = 0.005f * GameConstants.WorldScale;
-            lr.startColor = new Color(1f, 1f, 1f, 0.35f);
-            lr.endColor = new Color(1f, 1f, 1f, 0f);
-            lr.sortingOrder = 8;
-            lr.positionCount = 2;
-            lr.SetPosition(0, (Vector3)bhPos);
-            lr.SetPosition(1, new Vector3(
-                bhPos.x + Mathf.Cos(angle) * radius,
-                bhPos.y + Mathf.Sin(angle) * radius, 0));
-            if (mat != null) lr.material = new Material(mat);
-        }
-
-        // Arc line along the outer edge
-        var arcGo = new GameObject("ConeArc");
-        arcGo.transform.SetParent(go.transform, false);
-        var arcLr = arcGo.AddComponent<LineRenderer>();
-        arcLr.useWorldSpace = true;
-        arcLr.startWidth = 0.01f * GameConstants.WorldScale;
-        arcLr.endWidth = 0.01f * GameConstants.WorldScale;
-        arcLr.startColor = new Color(1f, 1f, 1f, 0.2f);
-        arcLr.endColor = new Color(1f, 1f, 1f, 0.2f);
-        arcLr.sortingOrder = 8;
-        int arcSegments = 16;
-        arcLr.positionCount = arcSegments + 1;
-        float arcRadius = radius * 0.5f;
-        for (int i = 0; i <= arcSegments; i++)
-        {
-            float a = baseAngle - halfAngle + (2f * halfAngle * i / arcSegments);
-            arcLr.SetPosition(i, new Vector3(
-                bhPos.x + Mathf.Cos(a) * arcRadius,
-                bhPos.y + Mathf.Sin(a) * arcRadius, 0));
-        }
-        if (mat != null) arcLr.material = new Material(mat);
+        if (mat != null) mr.material = mat;
+        mr.sortingOrder = 1; // behind balls
 
         return go;
     }
