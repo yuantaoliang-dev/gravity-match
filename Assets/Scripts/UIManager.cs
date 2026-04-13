@@ -22,8 +22,8 @@ public class UIManager : MonoBehaviour
     [Header("Remaining Warning")]
     public TextMeshProUGUI remainingCount;
 
-    // Level select (built dynamically)
-    private GameObject levelSelectPanel;
+    // Level select (managed by LevelSelectView)
+    private LevelSelectView levelSelectView;
     private Button levelsButton;
 
     // Center reward text (v21 "showRw")
@@ -332,13 +332,10 @@ public class UIManager : MonoBehaviour
         btnRT.anchorMax = new Vector2(0, 1);
         btnRT.anchoredPosition = new Vector2(30, -8);
         btnRT.sizeDelta = new Vector2(50, 18);
-
         var btnImg = btnGo.AddComponent<Image>();
         btnImg.color = new Color(1, 1, 1, 0.1f);
-
         levelsButton = btnGo.AddComponent<Button>();
         levelsButton.onClick.AddListener(ShowLevelSelect);
-        // Ensure button is on top of all other UI
         btnGo.transform.SetAsLastSibling();
 
         var btnTextGo = new GameObject("Text");
@@ -355,138 +352,15 @@ public class UIManager : MonoBehaviour
         btnText.alignment = TextAlignmentOptions.Center;
         btnText.color = new Color(1, 1, 1, 0.6f);
 
-        // Level select panel (hidden by default)
-        levelSelectPanel = new GameObject("LevelSelect");
-        levelSelectPanel.transform.SetParent(canvas.transform, false);
-        var panelRT = levelSelectPanel.AddComponent<RectTransform>();
-        panelRT.anchorMin = Vector2.zero;
-        panelRT.anchorMax = Vector2.one;
-        panelRT.offsetMin = Vector2.zero;
-        panelRT.offsetMax = Vector2.zero;
-
-        var panelImg = levelSelectPanel.AddComponent<Image>();
-        panelImg.color = new Color(0.04f, 0.05f, 0.08f, 1f); // solid background matching game bg
-
-        levelSelectPanel.SetActive(false);
+        // Create level select view (handles panel, grid, buttons)
+        levelSelectView = LevelSelectView.Create(canvas.transform);
     }
 
     public void ShowLevelSelect()
     {
         Debug.Log("[GravityMatch] ShowLevelSelect called");
-        if (levelSelectPanel == null) return;
-
-        // Clear old children
-        foreach (Transform child in levelSelectPanel.transform)
-            Destroy(child.gameObject);
-
+        if (levelSelectView == null) return;
         var gm = GameManager.Instance;
-
-        // Title
-        var titleGo = new GameObject("Title");
-        titleGo.transform.SetParent(levelSelectPanel.transform, false);
-        var titleRT = titleGo.AddComponent<RectTransform>();
-        titleRT.anchorMin = new Vector2(0.5f, 1);
-        titleRT.anchorMax = new Vector2(0.5f, 1);
-        titleRT.anchoredPosition = new Vector2(0, -80);
-        titleRT.sizeDelta = new Vector2(200, 30);
-        var titleText = titleGo.AddComponent<TextMeshProUGUI>();
-        titleText.text = "Select Level";
-        titleText.fontSize = 20;
-        titleText.fontStyle = FontStyles.Bold;
-        titleText.alignment = TextAlignmentOptions.Center;
-        titleText.color = Color.white;
-
-        // Level buttons in a grid
-        int count = gm.LevelCount;
-        int cols = 3;
-        float btnW = 70, btnH = 70, gap = 10;
-        float gridW = cols * btnW + (cols - 1) * gap;
-        float startX = -gridW / 2f + btnW / 2f;
-        float startY = -120;
-
-        for (int i = 0; i < count; i++)
-        {
-            int lvIndex = i; // capture for closure
-            int row = i / cols;
-            int col = i % cols;
-
-            var go = new GameObject($"LvBtn{i}");
-            go.transform.SetParent(levelSelectPanel.transform, false);
-            var rt = go.AddComponent<RectTransform>();
-            rt.anchorMin = new Vector2(0.5f, 1);
-            rt.anchorMax = new Vector2(0.5f, 1);
-            rt.anchoredPosition = new Vector2(startX + col * (btnW + gap), startY - row * (btnH + gap));
-            rt.sizeDelta = new Vector2(btnW, btnH);
-
-            var img = go.AddComponent<Image>();
-            img.color = new Color(1, 1, 1, 0.06f);
-
-            var btn = go.AddComponent<Button>();
-            btn.onClick.AddListener(() => {
-                gm.LoadLevel(lvIndex);
-                levelSelectPanel.SetActive(false);
-            });
-
-            // Level number
-            var numGo = new GameObject("Num");
-            numGo.transform.SetParent(go.transform, false);
-            var numRT = numGo.AddComponent<RectTransform>();
-            numRT.anchorMin = Vector2.zero;
-            numRT.anchorMax = Vector2.one;
-            numRT.offsetMin = new Vector2(0, 10);
-            numRT.offsetMax = Vector2.zero;
-            var numText = numGo.AddComponent<TextMeshProUGUI>();
-            numText.text = (i + 1).ToString();
-            numText.fontSize = 22;
-            numText.fontStyle = FontStyles.Bold;
-            numText.alignment = TextAlignmentOptions.Center;
-            numText.color = Color.white;
-
-            // Stars display
-            int starCount = gm.LevelStars[i];
-            var starGo = new GameObject("Stars");
-            starGo.transform.SetParent(go.transform, false);
-            var starRT = starGo.AddComponent<RectTransform>();
-            starRT.anchorMin = new Vector2(0, 0);
-            starRT.anchorMax = new Vector2(1, 0);
-            starRT.anchoredPosition = new Vector2(0, 12);
-            starRT.sizeDelta = new Vector2(0, 14);
-            var starText = starGo.AddComponent<TextMeshProUGUI>();
-            starText.text = starCount > 0 ? new string('*', starCount) : "-";
-            starText.fontSize = 11;
-            starText.alignment = TextAlignmentOptions.Center;
-            starText.color = new Color(0.937f, 0.624f, 0.153f); // amber
-        }
-
-        // Close button
-        var closeGo = new GameObject("CloseBtn");
-        closeGo.transform.SetParent(levelSelectPanel.transform, false);
-        var closeRT = closeGo.AddComponent<RectTransform>();
-        closeRT.anchorMin = new Vector2(0.5f, 0);
-        closeRT.anchorMax = new Vector2(0.5f, 0);
-        closeRT.anchoredPosition = new Vector2(0, 80);
-        closeRT.sizeDelta = new Vector2(100, 32);
-
-        var closeImg = closeGo.AddComponent<Image>();
-        closeImg.color = new Color(1, 1, 1, 0.1f);
-
-        var closeBtn = closeGo.AddComponent<Button>();
-        closeBtn.onClick.AddListener(() => levelSelectPanel.SetActive(false));
-
-        var closeTextGo = new GameObject("Text");
-        closeTextGo.transform.SetParent(closeGo.transform, false);
-        var closeTextRT = closeTextGo.AddComponent<RectTransform>();
-        closeTextRT.anchorMin = Vector2.zero;
-        closeTextRT.anchorMax = Vector2.one;
-        closeTextRT.offsetMin = Vector2.zero;
-        closeTextRT.offsetMax = Vector2.zero;
-        var closeText = closeTextGo.AddComponent<TextMeshProUGUI>();
-        closeText.text = "Close";
-        closeText.fontSize = 14;
-        closeText.fontStyle = FontStyles.Bold;
-        closeText.alignment = TextAlignmentOptions.Center;
-        closeText.color = Color.white;
-
-        levelSelectPanel.SetActive(true);
+        levelSelectView.Show(gm.LevelCount, gm.LevelStars, i => gm.LoadLevel(i));
     }
 }
