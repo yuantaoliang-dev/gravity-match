@@ -24,6 +24,9 @@ public class GameManager : MonoBehaviour
     public int score;
     public int comboCount;
 
+    // Subsystems
+    private MatchSystem matchSystem;
+
     // Cached camera (Camera.main requires MainCamera tag)
     private Camera cam;
     private SpriteRenderer bhRingSr;
@@ -57,6 +60,10 @@ public class GameManager : MonoBehaviour
         Instance = this;
         levels = LevelDataBuilder.BuildAll();
         levelStars = new int[levels.Count];
+
+        // Create subsystems
+        matchSystem = gameObject.AddComponent<MatchSystem>();
+        matchSystem.Init(this);
     }
 
     void Start()
@@ -359,35 +366,9 @@ public class GameManager : MonoBehaviour
     }
 
     // ===== MATCHING =====
-    public List<Ball> GetTouching(Ball b, float maxDist = -1)
-    {
-        if (maxDist < 0) maxDist = GameConstants.TouchDist;
-        return balls.Where(o => o.id != b.id && b.DistTo(o) <= maxDist).ToList();
-    }
-
-    public List<Ball> FindGroup(Ball start, float maxDist = -1)
-    {
-        if (maxDist < 0) maxDist = GameConstants.MatchTouchDist;
-        var group = new List<Ball> { start };
-        var visited = new HashSet<int> { start.id };
-        var queue = new Queue<Ball>();
-        queue.Enqueue(start);
-
-        while (queue.Count > 0)
-        {
-            var cur = queue.Dequeue();
-            foreach (var t in GetTouching(cur, maxDist))
-            {
-                if (!visited.Contains(t.id) && t.ballColor == start.ballColor)
-                {
-                    visited.Add(t.id);
-                    queue.Enqueue(t);
-                    group.Add(t);
-                }
-            }
-        }
-        return group;
-    }
+    // Forwarded to MatchSystem (Shooter.cs uses these via gm.FindGroup/GetTouching)
+    public List<Ball> GetTouching(Ball b, float maxDist = -1) => matchSystem.GetTouching(b, maxDist);
+    public List<Ball> FindGroup(Ball start, float maxDist = -1) => matchSystem.FindGroup(start, maxDist);
 
     // ===== COLOR SELECTION =====
     public List<Color> GetPairColors()
@@ -453,227 +434,9 @@ public class GameManager : MonoBehaviour
         ui.UpdateHUD(ballsLeft, score, balls.Count);
     }
 
-    // ===== MATCH RESOLUTION =====
-    /// <summary>
-    /// Full match sequence matching HTML v21 phases:
-    /// 1. Highlight (0.37s) — matched balls pulse white, player sees what matched
-    /// 2. Remove + Suck (0.53s) — balls disappear, pause before rotation
-    /// 3. Combo check → rotation
-    /// </summary>
+    // Match resolution forwarded to MatchSystem
     public void StartMatchSequence(int matchCount, List<Ball> targets, List<Ball> matchGrp, float coneBaseAngle, float coneAngle)
-    {
-        int pts = matchCount >= 5 ? GameConstants.Score5Match :
-                  matchCount == 4 ? GameConstants.Score4Match : GameConstants.Score3Match;
-        score += targets.Count * pts;
-        ui.UpdateHUD(ballsLeft, score, balls.Count);
-
-        Debug.Log($"[GravityMatch] StartMatchSequence: {matchCount}-match, targets={targets.Count}");
-
-        // Show reward text for 4/5-match, color = matched ball color brightened
-        if (matchCount >= 4 && matchGrp.Count > 0)
-        {
-            Color bc = matchGrp[0].ballColor;
-            Color bright = new Color(
-                Mathf.Min(1f, bc.r * 1.4f + 0.2f),
-                Mathf.Min(1f, bc.g * 1.4f + 0.2f),
-                Mathf.Min(1f, bc.b * 1.4f + 0.2f));
-            string msg = matchCount >= 5 ? "5+ MATCH!" : "4 MATCH!";
-            ui.ShowReward(msg, bright);
-        }
-
-        state = GameState.Highlight;
-        StartCoroutine(MatchSequenceCoroutine(matchCount, targets, matchGrp, coneBaseAngle, coneAngle));
-    }
-
-    IEnumerator MatchSequenceCoroutine(int matchCount, List<Ball> targets, List<Ball> matchGrp, float coneBaseAngle, float coneAngle)
-    {
-        var matchIds = new HashSet<int>(matchGrp.Select(b => b.id));
-        bool hasCone = matchCount >= 4 && coneAngle > 0;
-
-        // Create highlight rings for each target ball
-        var rings = new List<GameObject>();
-        foreach (var b in targets)
-        {
-            if (b == null) continue;
-            var ring = new GameObject("HighlightRing");
-            ring.transform.SetParent(b.transform, false);
-            ring.transform.localPosition = Vector3.zero;
-            var sr = ring.AddComponent<SpriteRenderer>();
-            sr.sprite = b.GetComponent<SpriteRenderer>().sprite;
-            sr.sortingOrder = 15;
-            var mat = GameConstants.CreateUnlitSpriteMaterial();
-            if (mat != null) sr.material = mat;
-            rings.Add(ring);
-        }
-
-        // Create cone FX mesh if 4/5-match
-        GameObject coneFxGo = null;
-        if (hasCone)
-        {
-            coneFxGo = CreateConeFX(coneBaseAngle, coneAngle);
-        }
-
-        // Phase 1: Highlight — v21 style pulsing rings (22 frames ≈ 0.37s)
-        float highlightEnd = Time.time + GameConstants.HighlightDuration;
-        while (Time.time < highlightEnd)
-        {
-            float pulse = 0.5f + 0.5f * Mathf.Sin(Time.time * 12f);
-            // Subtle ring just outside the ball edge
-            float ringSize = (GameConstants.BallRadius + (0.015f + pulse * 0.01f) * GameConstants.WorldScale) * 2f;
-
-            for (int i = 0; i < rings.Count && i < targets.Count; i++)
-            {
-                if (targets[i] == null || rings[i] == null) continue;
-                bool isMatch = matchIds.Contains(targets[i].id);
-                rings[i].transform.localScale = new Vector3(
-                    ringSize / targets[i].transform.localScale.x,
-                    ringSize / targets[i].transform.localScale.y, 1f);
-                var sr = rings[i].GetComponent<SpriteRenderer>();
-                // Use the ball's own color for the ring (brighter version)
-                Color ballCol = targets[i].ballColor;
-                float brightFactor = isMatch ? 1.3f : 1.1f;
-                Color ringCol = new Color(
-                    Mathf.Min(1f, ballCol.r * brightFactor),
-                    Mathf.Min(1f, ballCol.g * brightFactor),
-                    Mathf.Min(1f, ballCol.b * brightFactor),
-                    (isMatch ? 0.2f : 0.15f) + pulse * 0.25f
-                );
-                sr.color = ringCol;
-            }
-
-            // Fade cone FX (update vertex alpha for mesh)
-            if (coneFxGo != null)
-            {
-                float cp = (highlightEnd - Time.time) / GameConstants.HighlightDuration;
-                var mf = coneFxGo.GetComponent<MeshFilter>();
-                if (mf != null && mf.mesh != null)
-                {
-                    var cols = mf.mesh.colors32;
-                    // Center vertex (index 0): bright
-                    cols[0] = new Color32(255, 255, 255, (byte)(cp * 90));
-                    // Mid ring (index 1..arcSegs+1): medium
-                    // Outer ring (rest): zero
-                    for (int ci = 1; ci < cols.Length; ci++)
-                        cols[ci] = new Color32(255, 255, 255, (byte)(cols[ci].a > 0 ? cp * cols[ci].a : 0));
-                    mf.mesh.colors32 = cols;
-                }
-            }
-
-            yield return null;
-        }
-
-        // Cleanup highlight FX
-        foreach (var ring in rings) if (ring != null) Destroy(ring);
-        if (coneFxGo != null) Destroy(coneFxGo);
-
-        // Phase 2: Remove balls + suck pause
-        state = GameState.Suck;
-        RemoveBalls(targets);
-        ForceValidColors();
-        ui.UpdateHUD(ballsLeft, score, balls.Count);
-
-        yield return new WaitForSeconds(GameConstants.SuckDuration);
-
-        // Phase 3: Combo check → rotation
-        bool hasSingle = balls.Any(b =>
-            !GetTouching(b, GameConstants.MatchTouchDist).Any(nb => nb.ballColor == b.ballColor));
-        if (hasSingle)
-        {
-            comboCount++;
-            if (comboCount >= 3)
-            {
-                comboCount = 0;
-                ComboBonus();
-                // v21: showRw('3× COMBO! +300', '#FFE66D')
-                ui.ShowReward("3x COMBO! +300", new Color(1f, 0.9f, 0.43f));
-                // Wait for buddy FX to show
-                state = GameState.Buddy;
-                yield return new WaitForSeconds(GameConstants.BuddyFXDuration);
-            }
-        }
-        else
-        {
-            comboCount = 0;
-        }
-
-        ForceValidColors();
-        ui.UpdateHUD(ballsLeft, score, balls.Count);
-        StartRotation();
-    }
-
-    /// <summary>
-    /// v21 flashlight cone: filled wedge mesh with radial gradient.
-    /// Center bright, 30% radius medium, outer edge transparent.
-    /// </summary>
-    GameObject CreateConeFX(float baseAngle, float halfAngle)
-    {
-        Vector2 bhPos = blackHole.position;
-        float outerR = cam.orthographicSize * 2f;
-        float midR = outerR * 0.3f; // v21: gradient stop at 30%
-        int arcSegs = 16;
-
-        var go = new GameObject("ConeFX");
-        go.transform.position = new Vector3(bhPos.x, bhPos.y, 0);
-
-        // Mesh: center(1) + mid ring(arcSegs+1) + outer ring(arcSegs+1)
-        int midStart = 1;
-        int outerStart = midStart + arcSegs + 1;
-        int vertCount = 1 + (arcSegs + 1) * 2;
-        var verts = new Vector3[vertCount];
-        var colors = new Color32[vertCount];
-
-        // Center vertex: bright white
-        verts[0] = Vector3.zero;
-        colors[0] = new Color32(255, 255, 255, 90); // v21: p*0.35 ≈ 90/255
-
-        for (int i = 0; i <= arcSegs; i++)
-        {
-            float a = baseAngle - halfAngle + (2f * halfAngle * i / arcSegs);
-            float cos = Mathf.Cos(a);
-            float sin = Mathf.Sin(a);
-
-            // Mid ring: medium brightness
-            verts[midStart + i] = new Vector3(cos * midR, sin * midR, 0);
-            colors[midStart + i] = new Color32(255, 255, 255, 38); // v21: p*0.15 ≈ 38/255
-
-            // Outer ring: transparent
-            verts[outerStart + i] = new Vector3(cos * outerR, sin * outerR, 0);
-            colors[outerStart + i] = new Color32(255, 255, 255, 0);
-        }
-
-        // Triangles: center→mid fan, then mid→outer strip
-        var tris = new List<int>();
-        for (int i = 0; i < arcSegs; i++)
-        {
-            // Center to mid ring fan
-            tris.Add(0);
-            tris.Add(midStart + i);
-            tris.Add(midStart + i + 1);
-
-            // Mid to outer ring strip (two triangles per segment)
-            tris.Add(midStart + i);
-            tris.Add(outerStart + i);
-            tris.Add(outerStart + i + 1);
-
-            tris.Add(midStart + i);
-            tris.Add(outerStart + i + 1);
-            tris.Add(midStart + i + 1);
-        }
-
-        var mesh = new Mesh();
-        mesh.vertices = verts;
-        mesh.triangles = tris.ToArray();
-        mesh.colors32 = colors;
-
-        var mf = go.AddComponent<MeshFilter>();
-        mf.mesh = mesh;
-        var mr = go.AddComponent<MeshRenderer>();
-        var mat = GameConstants.CreateUnlitSpriteMaterial();
-        if (mat != null) mr.material = mat;
-        mr.sortingOrder = 1; // behind balls
-
-        return go;
-    }
+        => matchSystem.StartMatchSequence(matchCount, targets, matchGrp, coneBaseAngle, coneAngle);
 
     // ===== ROTATION =====
     public void StartRotation()
@@ -720,123 +483,6 @@ public class GameManager : MonoBehaviour
             ui.UpdateHUD(ballsLeft, score, balls.Count);
             CheckEnd();
         }
-    }
-
-    // ===== COMBO BUDDY =====
-    /// <summary>
-    /// 3x combo bonus: find a lonely ball and attach a same-color buddy next to it.
-    /// Matches v21 comboBonus(): try 12 angles around the singleton, pick the
-    /// position furthest from BH that doesn't overlap other balls.
-    /// </summary>
-    void ComboBonus()
-    {
-        // Find singletons (no same-color touching neighbor)
-        var singles = new List<Ball>();
-        foreach (var b in balls)
-        {
-            bool hasMatch = GetTouching(b, GameConstants.MatchTouchDist)
-                .Any(t => t.ballColor == b.ballColor);
-            if (!hasMatch) singles.Add(b);
-        }
-        if (singles.Count == 0) return;
-
-        var target = singles[Random.Range(0, singles.Count)];
-        Vector2 tPos = target.transform.position;
-        Vector2 bhPos = blackHole.position;
-        float od = GameConstants.OverlapDistance;
-        float hh = cam.orthographicSize;
-        float hw = hh * cam.aspect;
-        float r = GameConstants.BallRadius;
-
-        // Try 12 angles, pick position furthest from BH
-        Vector2 bestPos = tPos + Vector2.right * od;
-        float bestScore = -1f;
-
-        for (int ai = 0; ai < 12; ai++)
-        {
-            float ang = ai * Mathf.PI * 2f / 12f;
-            Vector2 tryPos = tPos + new Vector2(Mathf.Cos(ang), Mathf.Sin(ang)) * od;
-
-            // Must be in camera bounds
-            if (tryPos.x < -hw + r || tryPos.x > hw - r) continue;
-            if (tryPos.y < -hh + r || tryPos.y > hh - r) continue;
-
-            // Must not overlap BH
-            if (Vector2.Distance(tryPos, bhPos) < BHEventHorizon + r) continue;
-
-            // Must not overlap other balls
-            bool ok = true;
-            foreach (var b2 in balls)
-            {
-                if (b2.id == target.id) continue;
-                if (Vector2.Distance(tryPos, b2.transform.position) < od - 0.01f * GameConstants.WorldScale)
-                {
-                    ok = false;
-                    break;
-                }
-            }
-            if (!ok) continue;
-
-            // Prefer positions further from BH (safer)
-            float sc = Vector2.Distance(tryPos, bhPos);
-            if (sc > bestScore)
-            {
-                bestScore = sc;
-                bestPos = tryPos;
-            }
-        }
-
-        if (bestScore > 0)
-        {
-            var buddy = SpawnBall(bestPos, target.ballColor);
-
-            // Visual FX: glow rings on both target and buddy
-            StartCoroutine(BuddyFX(target, buddy));
-
-            score += GameConstants.ScoreComboBonus;
-            ui.UpdateHUD(ballsLeft, score, balls.Count);
-            Debug.Log($"[GravityMatch] 3x COMBO! Buddy spawned for {GameConstants.ColorToHex(target.ballColor)}");
-        }
-    }
-
-    IEnumerator BuddyFX(Ball target, Ball buddy)
-    {
-        // Create glow rings on both balls
-        var rings = new List<GameObject>();
-        foreach (var b in new[] { target, buddy })
-        {
-            if (b == null) continue;
-            var ring = new GameObject("BuddyRing");
-            ring.transform.SetParent(b.transform, false);
-            ring.transform.localPosition = Vector3.zero;
-            var sr = ring.AddComponent<SpriteRenderer>();
-            sr.sprite = b.GetComponent<SpriteRenderer>().sprite;
-            sr.sortingOrder = 15;
-            var mat = GameConstants.CreateUnlitSpriteMaterial();
-            if (mat != null) sr.material = mat;
-            rings.Add(ring);
-        }
-
-        // Animate: expanding gold ring
-        float duration = GameConstants.BuddyFXDuration;
-        float elapsed = 0f;
-        while (elapsed < duration)
-        {
-            float t = elapsed / duration;
-            float ringScale = (1.1f + t * 0.4f); // expand outward
-            float alpha = (1f - t) * 0.5f; // fade out
-            foreach (var ring in rings)
-            {
-                if (ring == null) continue;
-                ring.transform.localScale = new Vector3(ringScale, ringScale, 1f);
-                ring.GetComponent<SpriteRenderer>().color =
-                    new Color(1f, 0.9f, 0.43f, alpha); // gold (#FFE66D)
-            }
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        foreach (var ring in rings) if (ring != null) Destroy(ring);
     }
 
     // ===== BLACK HOLE AUTO-ABSORB =====
