@@ -258,9 +258,11 @@ public class Shooter : MonoBehaviour
 
         gm.ForceValidColors();
 
-        // Create projectile
-        projectile = Instantiate(gm.ballPrefab, transform.position, Quaternion.identity);
+        // Create projectile from pool
+        projectile = gm.SpawnBall(transform.position, gm.currentColor).gameObject;
+        // Remove from field ball list (projectile is in-flight, not a field ball)
         var ball = projectile.GetComponent<Ball>();
+        gm.Balls.Remove(ball);
         ball.Init(-1, gm.currentColor);
         projVelocity = dir * GameConstants.BallSpeed;
         projBounces = 0;
@@ -307,7 +309,7 @@ public class Shooter : MonoBehaviour
 
                 if (projBounces > GameConstants.MaxBounces || pos.y < transform.position.y - 0.2f)
                 {
-                    Destroy(projectile);
+                    gm.ReturnBallToPool(projectile);
                     projectile = null;
                     gm.comboCount = 0;
                     gm.StartRotation();
@@ -319,7 +321,7 @@ public class Shooter : MonoBehaviour
                 float bhEH = gm.BHEventHorizon;
                 if (((Vector2)pos - bhPos).sqrMagnitude < bhEH * bhEH)
                 {
-                    Destroy(projectile);
+                    gm.ReturnBallToPool(projectile);
                     projectile = null;
                     gm.OnProjectileAbsorbedByBH();
                     return;
@@ -343,7 +345,7 @@ public class Shooter : MonoBehaviour
                 {
                     Color projColor = projectile.GetComponent<Ball>().ballColor;
                     Vector2 vel = projVelocity.normalized;
-                    Destroy(projectile);
+                    gm.ReturnBallToPool(projectile);
                     projectile = null;
 
                     Vector2 hitCenter = hitBall.transform.position;

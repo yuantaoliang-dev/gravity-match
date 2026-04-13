@@ -34,8 +34,7 @@ public class LevelManager : MonoBehaviour
         CurrentLevel = index;
         var lv = levels[index];
 
-        // Clear existing balls
-        foreach (var b in gm.Balls) if (b != null) Object.Destroy(b.gameObject);
+        // Return existing balls to pool and reset state
         gm.ResetForLevel(lv.budget);
 
         // Spawn balls from level data

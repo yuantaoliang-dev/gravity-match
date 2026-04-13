@@ -40,6 +40,10 @@ public class GameManager : MonoBehaviour
     private Camera cam;
     private List<Ball> balls = new List<Ball>();
     private int nextBallId = 0;
+
+    // Ball object pool
+    private Stack<GameObject> ballPool = new Stack<GameObject>();
+    const int BallPoolPrewarm = 20;
     private float fieldAngle = 0f;
     private float rotationTarget = 0f;
     private bool isRotating = false;
@@ -95,6 +99,14 @@ public class GameManager : MonoBehaviour
             shooter.transform.position = new Vector3(0, 0.2f - 2.24f, 0);
         }
 
+        // Pre-warm ball pool
+        for (int i = 0; i < BallPoolPrewarm; i++)
+        {
+            var go = Instantiate(ballPrefab, Vector3.zero, Quaternion.identity, ballContainer);
+            go.SetActive(false);
+            ballPool.Push(go);
+        }
+
         // Initialize subsystems
         blackHoleController.Init(this, blackHole);
         levelManager.Init(this, cam);
@@ -120,6 +132,11 @@ public class GameManager : MonoBehaviour
     /// <summary>Reset game state for a new level. Called by LevelManager.</summary>
     public void ResetForLevel(int budget)
     {
+        // Return all active balls to pool
+        foreach (var b in balls)
+        {
+            if (b != null) ReturnBallToPool(b.gameObject);
+        }
         balls.Clear();
         nextBallId = 0;
         blackHoleController.ResetForLevel();
@@ -139,10 +156,22 @@ public class GameManager : MonoBehaviour
         nextColor = PickNextColor();
     }
 
-    // ===== BALL MANAGEMENT =====
+    // ===== BALL MANAGEMENT (pooled) =====
     public Ball SpawnBall(Vector2 pos, Color color)
     {
-        var go = Instantiate(ballPrefab, pos, Quaternion.identity, ballContainer);
+        GameObject go;
+        if (ballPool.Count > 0)
+        {
+            go = ballPool.Pop();
+            go.transform.SetParent(ballContainer);
+            go.transform.position = pos;
+            go.transform.rotation = Quaternion.identity;
+            go.SetActive(true);
+        }
+        else
+        {
+            go = Instantiate(ballPrefab, pos, Quaternion.identity, ballContainer);
+        }
         var ball = go.GetComponent<Ball>();
         ball.Init(nextBallId++, color);
         balls.Add(ball);
@@ -155,10 +184,17 @@ public class GameManager : MonoBehaviour
         {
             balls.Remove(b);
             SpawnSuckGhost(b); // v21 suck FX: ghost slides toward BH
-            b.gameObject.SetActive(false);
-            Destroy(b.gameObject);
+            ReturnBallToPool(b.gameObject);
         }
         blackHoleController.OnBallsEaten(list.Count);
+    }
+
+    /// <summary>Deactivate ball and return to pool for reuse.</summary>
+    public void ReturnBallToPool(GameObject go)
+    {
+        go.SetActive(false);
+        go.transform.SetParent(ballContainer);
+        ballPool.Push(go);
     }
 
     /// <summary>
