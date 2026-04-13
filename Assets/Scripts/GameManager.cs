@@ -3,51 +3,51 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 
+/// <summary>
+/// Central game orchestrator. Delegates to subsystems:
+///   MatchSystem — match detection, elimination sequence, combo buddy
+///   BlackHoleController — BH growth, visuals, auto-absorb
+///   LevelManager — level loading, layout validation, win/lose
+/// Retains: ball collection, color queue, field rotation, shooting callback.
+/// </summary>
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
 
-    [Header("References")]
+    [Header("Scene References")]
     public GameObject ballPrefab;
     public Transform ballContainer;
     public Transform blackHole;
     public Shooter shooter;
     public UIManager ui;
 
-    [Header("State")]
+    [Header("Game State")]
     public GameState state = GameState.Play;
     public int ballsLeft;
     public int score;
     public int comboCount;
 
-    // Subsystems
+    /// <summary>Game state machine. Highlight/Suck/Buddy block input during match sequence.</summary>
+    public enum GameState { Play, Highlight, Suck, Buddy, Rotating, Won, Lost }
+
+    // ===== SUBSYSTEMS =====
     private MatchSystem matchSystem;
     private BlackHoleController blackHoleController;
     private LevelManager levelManager;
 
-    // Cached camera (Camera.main requires MainCamera tag)
+    // ===== INTERNAL STATE =====
     private Camera cam;
-
-    // Ball tracking
     private List<Ball> balls = new List<Ball>();
     private int nextBallId = 0;
-
-    // Black hole (forwarded to BlackHoleController)
-    public float BHRadius => blackHoleController.Radius;
-    public float BHEventHorizon => blackHoleController.EventHorizon;
-
-    // Field rotation
     private float fieldAngle = 0f;
     private float rotationTarget = 0f;
     private bool isRotating = false;
 
-    // Color queue
+    // ===== FORWARDED PROPERTIES =====
+    public float BHRadius => blackHoleController.Radius;
+    public float BHEventHorizon => blackHoleController.EventHorizon;
     public Color currentColor { get; private set; }
     public Color nextColor { get; private set; }
-
-
-    public enum GameState { Play, Highlight, Suck, Buddy, Rotating, Won, Lost }
-    // Highlight, Suck, Buddy: used during post-match sequence (blocks input)
 
     void Awake()
     {
@@ -107,9 +107,6 @@ public class GameManager : MonoBehaviour
             UpdateRotation();
         }
     }
-
-    // Level management forwarded to LevelManager
-    public void LoadLevel(int index) => levelManager.LoadLevel(index);
 
     /// <summary>Reset game state for a new level. Called by LevelManager.</summary>
     public void ResetForLevel(int budget)
@@ -204,8 +201,7 @@ public class GameManager : MonoBehaviour
         Destroy(go);
     }
 
-    // ===== MATCHING =====
-    // Forwarded to MatchSystem (Shooter.cs uses these via gm.FindGroup/GetTouching)
+    // ===== SUBSYSTEM FORWARDS (Shooter.cs facade) =====
     public List<Ball> GetTouching(Ball b, float maxDist = -1) => matchSystem.GetTouching(b, maxDist);
     public List<Ball> FindGroup(Ball start, float maxDist = -1) => matchSystem.FindGroup(start, maxDist);
 
@@ -273,9 +269,13 @@ public class GameManager : MonoBehaviour
         ui.UpdateHUD(ballsLeft, score, balls.Count);
     }
 
-    // Match resolution forwarded to MatchSystem
     public void StartMatchSequence(int matchCount, List<Ball> targets, List<Ball> matchGrp, float coneBaseAngle, float coneAngle)
         => matchSystem.StartMatchSequence(matchCount, targets, matchGrp, coneBaseAngle, coneAngle);
+    public void OnProjectileAbsorbedByBH() => blackHoleController.OnProjectileAbsorbed();
+    public void CheckEnd() => levelManager.CheckEnd();
+    public void LoadLevel(int index) => levelManager.LoadLevel(index);
+    public void Restart() => levelManager.Restart();
+    public void NextLevel() => levelManager.NextLevel();
 
     // ===== ROTATION =====
     public void StartRotation()
@@ -324,18 +324,10 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // Black hole absorption forwarded to BlackHoleController
-    public void OnProjectileAbsorbedByBH() => blackHoleController.OnProjectileAbsorbed();
-
-    // Win/lose check forwarded to LevelManager
-    public void CheckEnd() => levelManager.CheckEnd();
-
     // ===== PUBLIC ACCESSORS =====
     public List<Ball> Balls => balls;
     public bool IsRotating => isRotating;
     public int[] LevelStars => levelManager.LevelStars;
     public int LevelCount => levelManager.LevelCount;
     public int currentLevel => levelManager.CurrentLevel;
-    public void Restart() => levelManager.Restart();
-    public void NextLevel() => levelManager.NextLevel();
 }
