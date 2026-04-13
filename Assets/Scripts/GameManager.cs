@@ -14,12 +14,8 @@ public class GameManager : MonoBehaviour
     public Shooter shooter;
     public UIManager ui;
 
-    [Header("Level Data")]
-    private List<LevelDef> levels;
-
     [Header("State")]
     public GameState state = GameState.Play;
-    public int currentLevel = 0;
     public int ballsLeft;
     public int score;
     public int comboCount;
@@ -27,6 +23,7 @@ public class GameManager : MonoBehaviour
     // Subsystems
     private MatchSystem matchSystem;
     private BlackHoleController blackHoleController;
+    private LevelManager levelManager;
 
     // Cached camera (Camera.main requires MainCamera tag)
     private Camera cam;
@@ -48,8 +45,6 @@ public class GameManager : MonoBehaviour
     public Color currentColor { get; private set; }
     public Color nextColor { get; private set; }
 
-    // Level star tracking
-    private int[] levelStars;
 
     public enum GameState { Play, Highlight, Suck, Buddy, Rotating, Won, Lost }
     // Highlight, Suck, Buddy: used during post-match sequence (blocks input)
@@ -57,13 +52,12 @@ public class GameManager : MonoBehaviour
     void Awake()
     {
         Instance = this;
-        levels = LevelDataBuilder.BuildAll();
-        levelStars = new int[levels.Count];
 
         // Create subsystems
         matchSystem = gameObject.AddComponent<MatchSystem>();
         matchSystem.Init(this);
         blackHoleController = gameObject.AddComponent<BlackHoleController>();
+        levelManager = gameObject.AddComponent<LevelManager>();
     }
 
     void Start()
@@ -92,10 +86,11 @@ public class GameManager : MonoBehaviour
             shooter.transform.position = new Vector3(0, 0.2f - 2.24f, 0);
         }
 
-        // Initialize BlackHole controller (handles visuals + growth)
+        // Initialize subsystems
         blackHoleController.Init(this, blackHole);
+        levelManager.Init(this, cam);
 
-        LoadLevel(0);
+        levelManager.LoadLevel(0);
     }
 
     void Update()
@@ -113,14 +108,12 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // ===== LEVEL LOADING =====
-    public void LoadLevel(int index)
-    {
-        currentLevel = index;
-        var lv = levels[index];
+    // Level management forwarded to LevelManager
+    public void LoadLevel(int index) => levelManager.LoadLevel(index);
 
-        // Clear existing balls
-        foreach (var b in balls) if (b != null) Destroy(b.gameObject);
+    /// <summary>Reset game state for a new level. Called by LevelManager.</summary>
+    public void ResetForLevel(int budget)
+    {
         balls.Clear();
         nextBallId = 0;
         blackHoleController.ResetForLevel();
@@ -129,145 +122,15 @@ public class GameManager : MonoBehaviour
         fieldAngle = 0f;
         rotationTarget = 0f;
         isRotating = false;
-        ballsLeft = lv.budget;
+        ballsLeft = budget;
         state = GameState.Play;
+    }
 
-        // Spawn balls from level data
-        Vector2 center = blackHole.position;
-        var positions = lv.GenerateBallPositions(center);
-        foreach (var (pos, color) in positions)
-        {
-            SpawnBall(pos, color);
-        }
-
-        // Startup validation: prevent 3+ same-color groups
-        for (int v = 0; v < 50; v++)
-        {
-            bool found = false;
-            foreach (var b in balls)
-            {
-                var grp = FindGroup(b, GameConstants.StrictTouchDist);
-                if (grp.Count >= 3)
-                {
-                    var otherColors = lv.colors.Where(c => c != b.ballColor).ToArray();
-                    b.Init(b.id, otherColors[Random.Range(0, otherColors.Length)]);
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) break;
-        }
-
-        // Push apart different-color balls so they don't visually overlap
-        PushApartDifferentColors();
-
-        // Re-normalize same-color pairs to consistent OverlapDistance
-        // (PushApart may have shifted pair members)
-        RestorePairDistances();
-
-        // Init color queue
+    /// <summary>Initialize color queue after level load. Called by LevelManager.</summary>
+    public void InitColorQueue()
+    {
         currentColor = PickNextColor();
         nextColor = PickNextColor();
-
-        ui.UpdateHUD(ballsLeft, score, balls.Count);
-        ui.ShowLevelName(index + 1, lv.name);
-    }
-
-    void PushApartDifferentColors()
-    {
-        // Identify pair balls
-        var pairIds = new HashSet<int>();
-        var visited = new HashSet<int>();
-        foreach (var b in balls)
-        {
-            if (visited.Contains(b.id)) continue;
-            var grp = FindGroup(b, GameConstants.MatchTouchDist);
-            foreach (var g in grp) visited.Add(g.id);
-            if (grp.Count >= 2) foreach (var g in grp) pairIds.Add(g.id);
-        }
-
-        float minVis = GameConstants.MinVisDist;
-        Vector2 center = blackHole.position;
-
-        for (int iter = 0; iter < 150; iter++)
-        {
-            bool pushed = false;
-            for (int i = 0; i < balls.Count; i++)
-            {
-                for (int j = i + 1; j < balls.Count; j++)
-                {
-                    var bi = balls[i]; var bj = balls[j];
-                    if (bi.ballColor == bj.ballColor) continue;
-                    float d = bi.DistTo(bj);
-                    if (d < minVis && d > 0.001f)
-                    {
-                        Vector2 dir = ((Vector2)bj.transform.position - (Vector2)bi.transform.position).normalized;
-                        float push = minVis - d + 0.01f * GameConstants.WorldScale;
-                        bool iP = pairIds.Contains(bi.id), jP = pairIds.Contains(bj.id);
-                        if (iP && !jP)
-                            bj.transform.position += (Vector3)(dir * push);
-                        else if (!iP && jP)
-                            bi.transform.position -= (Vector3)(dir * push);
-                        else
-                        {
-                            bi.transform.position -= (Vector3)(dir * push * 0.5f);
-                            bj.transform.position += (Vector3)(dir * push * 0.5f);
-                        }
-                        // Clamp to bounds and away from BH
-                        ClampBallPosition(bi);
-                        ClampBallPosition(bj);
-                        pushed = true;
-                    }
-                }
-            }
-            if (!pushed) break;
-        }
-    }
-
-    void RestorePairDistances()
-    {
-        // Only fix groups of exactly 2 same-color balls (true pairs).
-        // Adjust to OverlapDistance along their connecting line, midpoint fixed.
-        float od = GameConstants.OverlapDistance;
-        var visited = new HashSet<int>();
-
-        foreach (var b in balls)
-        {
-            if (visited.Contains(b.id)) continue;
-            var grp = FindGroup(b, GameConstants.MatchTouchDist);
-            foreach (var g in grp) visited.Add(g.id);
-            if (grp.Count != 2) continue;
-
-            Vector2 p0 = grp[0].transform.position;
-            Vector2 p1 = grp[1].transform.position;
-            Vector2 mid = (p0 + p1) * 0.5f;
-            Vector2 dir = (p1 - p0).normalized;
-            grp[0].transform.position = (Vector3)(mid - dir * od * 0.5f);
-            grp[1].transform.position = (Vector3)(mid + dir * od * 0.5f);
-        }
-    }
-
-    void ClampBallPosition(Ball b)
-    {
-        Vector2 pos = b.transform.position;
-        float r = GameConstants.BallRadius;
-
-        // Clamp to camera bounds (v21: WALL_L+BR to WALL_R-BR)
-        float hh = cam.orthographicSize;
-        float hw = hh * cam.aspect;
-        pos.x = Mathf.Clamp(pos.x, -hw + r, hw - r);
-        pos.y = Mathf.Clamp(pos.y, -hh + r, hh - r);
-
-        // Keep away from BH
-        Vector2 center = blackHole.position;
-        float dist = Vector2.Distance(pos, center);
-        if (dist < BHEventHorizon + r + 0.02f * GameConstants.WorldScale)
-        {
-            Vector2 dir = (pos - center).normalized;
-            pos = center + dir * (BHEventHorizon + r + 0.03f * GameConstants.WorldScale);
-        }
-
-        b.transform.position = pos;
     }
 
     // ===== BALL MANAGEMENT =====
@@ -464,34 +327,15 @@ public class GameManager : MonoBehaviour
     // Black hole absorption forwarded to BlackHoleController
     public void OnProjectileAbsorbedByBH() => blackHoleController.OnProjectileAbsorbed();
 
-    // ===== WIN/LOSE =====
-    // v21: only checks during 'play' state, not during rotation or pending match
-    public void CheckEnd()
-    {
-        if (state != GameState.Play) return;
-        if (balls.Count == 0)
-        {
-            state = GameState.Won;
-            var lv = levels[currentLevel];
-            int remBonus = ballsLeft * GameConstants.ScoreLeftover;
-            score += remBonus;
-            int stars = score >= lv.starScore3 ? 3 : score >= lv.starScore2 ? 2 : 1;
-            levelStars[currentLevel] = Mathf.Max(levelStars[currentLevel], stars);
-            bool hasNext = currentLevel < levels.Count - 1;
-            ui.ShowWin(stars, score, ballsLeft, hasNext);
-        }
-        else if (ballsLeft <= 0 && !shooter.HasProjectile)
-        {
-            state = GameState.Lost;
-            ui.ShowLose(balls.Count);
-        }
-    }
+    // Win/lose check forwarded to LevelManager
+    public void CheckEnd() => levelManager.CheckEnd();
 
     // ===== PUBLIC ACCESSORS =====
     public List<Ball> Balls => balls;
     public bool IsRotating => isRotating;
-    public int[] LevelStars => levelStars;
-    public int LevelCount => levels.Count;
-    public void Restart() => LoadLevel(currentLevel);
-    public void NextLevel() { if (currentLevel < levels.Count - 1) LoadLevel(currentLevel + 1); }
+    public int[] LevelStars => levelManager.LevelStars;
+    public int LevelCount => levelManager.LevelCount;
+    public int currentLevel => levelManager.CurrentLevel;
+    public void Restart() => levelManager.Restart();
+    public void NextLevel() => levelManager.NextLevel();
 }
