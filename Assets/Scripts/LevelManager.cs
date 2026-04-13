@@ -17,6 +17,7 @@ public class LevelManager : MonoBehaviour
     public int CurrentLevel { get; private set; }
     public int LevelCount => levels.Count;
     public int[] LevelStars => levelStars;
+    public LevelDef GetCurrentLevelDef() => levels[CurrentLevel];
 
     public void Init(GameManager gm, Camera cam)
     {

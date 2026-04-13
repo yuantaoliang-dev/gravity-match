@@ -284,7 +284,7 @@ public class UIManager : MonoBehaviour
         rewardText.fontSize = 16;
         rewardText.fontStyle = FontStyles.Bold;
         rewardText.alignment = TextAlignmentOptions.Center;
-        rewardText.enableWordWrapping = false;
+        rewardText.textWrappingMode = TMPro.TextWrappingModes.NoWrap;
         rewardText.raycastTarget = false;
         rewardText.color = new Color(1, 1, 1, 0);
     }

@@ -226,10 +226,10 @@ public class GameManager : MonoBehaviour
 
     public Color PickNextColor()
     {
-        if (balls.Count == 0) return levels[currentLevel].colors[0];
+        if (balls.Count == 0) return levelManager.GetCurrentLevelDef().colors[0];
         var pc = GetPairColors();
         if (pc.Count == 0) pc = balls.Select(b => b.ballColor).Distinct().ToList();
-        if (pc.Count == 0) return levels[currentLevel].colors[0];
+        if (pc.Count == 0) return levelManager.GetCurrentLevelDef().colors[0];
         if (pc.Count == 1) return pc[0];
 
         // Weighted random
