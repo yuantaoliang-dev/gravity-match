@@ -279,25 +279,27 @@ public class Shooter : MonoBehaviour
             if (projectile == null) return;
 
             Vector2 pos = projectile.transform.position;
-            float minDist = float.MaxValue;
+            float minDistSq = float.MaxValue;
             foreach (var b in gm.Balls)
             {
-                float d = Vector2.Distance(pos, b.transform.position);
-                if (d < minDist) minDist = d;
+                float dSq = ((Vector2)b.transform.position - pos).sqrMagnitude;
+                if (dSq < minDistSq) minDistSq = dSq;
             }
 
-            // Sub-stepping near balls
-            int sub = minDist < GameConstants.BallRadius * 3 ? 6 :
-                      minDist < GameConstants.BallRadius * 6 ? 3 : 1;
+            // Sub-stepping near balls (compare with squared thresholds)
+            float thresh3 = GameConstants.BallRadius * 3f;
+            float thresh6 = GameConstants.BallRadius * 6f;
+            int sub = minDistSq < thresh3 * thresh3 ? 6 :
+                      minDistSq < thresh6 * thresh6 ? 3 : 1;
             Vector2 subVel = projVelocity / sub * dt / 60f;
 
             for (int step = 0; step < sub; step++)
             {
                 pos += subVel;
 
-                // Wall bounces (camera bounds)
-                float hh = Camera.main.orthographicSize;
-                float hw = hh * Camera.main.aspect;
+                // Wall bounces (cached camera bounds)
+                float hh = gm.CamHH;
+                float hw = gm.CamHW;
                 float r = GameConstants.BallRadius;
                 if (pos.x - r <= -hw) { pos.x = -hw + r; projVelocity.x *= -1; subVel.x *= -1; projBounces++; }
                 if (pos.x + r >= hw) { pos.x = hw - r; projVelocity.x *= -1; subVel.x *= -1; projBounces++; }
@@ -314,7 +316,8 @@ public class Shooter : MonoBehaviour
 
                 // Black hole absorb
                 Vector2 bhPos = gm.blackHole.position;
-                if (Vector2.Distance(pos, bhPos) < gm.BHEventHorizon)
+                float bhEH = gm.BHEventHorizon;
+                if (((Vector2)pos - bhPos).sqrMagnitude < bhEH * bhEH)
                 {
                     Destroy(projectile);
                     projectile = null;
@@ -322,15 +325,16 @@ public class Shooter : MonoBehaviour
                     return;
                 }
 
-                // Hit detection
+                // Hit detection (squared distance comparison)
                 Ball hitBall = null;
-                float hitDist = float.MaxValue;
+                float hitDistSq = float.MaxValue;
+                float hdSq = GameConstants.HitDetectDist * GameConstants.HitDetectDist;
                 foreach (var b in gm.Balls)
                 {
-                    float d = Vector2.Distance(pos, b.transform.position);
-                    if (d < GameConstants.HitDetectDist && d < hitDist)
+                    float dSq = ((Vector2)b.transform.position - pos).sqrMagnitude;
+                    if (dSq < hdSq && dSq < hitDistSq)
                     {
-                        hitDist = d;
+                        hitDistSq = dSq;
                         hitBall = b;
                     }
                 }
@@ -516,12 +520,15 @@ public class Shooter : MonoBehaviour
         float stepDist = 0.0225f * GameConstants.WorldScale;
         Vector2 v = dir * stepDist;
         int bounces = 0;
-        float hh = Camera.main.orthographicSize;
-        float hw = hh * Camera.main.aspect;
+        float hh = gm.CamHH;
+        float hw = gm.CamHW;
         float r = GameConstants.BallRadius;
         float hd = GameConstants.HitDetectDist;
         Vector2 bhPos = gm.blackHole.position;
         float shooterY = transform.position.y;
+        float trajBhEH = gm.BHEventHorizon;
+        float trajBhEHSq = trajBhEH * trajBhEH;
+        float hdSqTraj = hd * hd;
 
         for (int i = 0; i < 400; i++) // v21 max 400 steps
         {
@@ -535,13 +542,13 @@ public class Shooter : MonoBehaviour
             // Stop conditions
             if (bounces > GameConstants.MaxBounces) break;
             if (pos.y < shooterY - 0.1f) break;
-            if (Vector2.Distance(pos, bhPos) < gm.BHEventHorizon) break;
+            if ((pos - bhPos).sqrMagnitude < trajBhEHSq) break;
 
-            // Stop at ball hit (v21: dist < BR*1.7)
+            // Stop at ball hit (v21: dist < BR*1.7, squared comparison)
             bool hitBall = false;
             foreach (var b in gm.Balls)
             {
-                if (Vector2.Distance(pos, b.transform.position) < hd) { hitBall = true; break; }
+                if (((Vector2)b.transform.position - pos).sqrMagnitude < hdSqTraj) { hitBall = true; break; }
             }
             if (hitBall) break;
 

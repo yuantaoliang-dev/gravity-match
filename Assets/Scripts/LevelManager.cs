@@ -157,8 +157,8 @@ public class LevelManager : MonoBehaviour
     {
         Vector2 pos = b.transform.position;
         float r = GameConstants.BallRadius;
-        float hh = cam.orthographicSize;
-        float hw = hh * cam.aspect;
+        float hh = gm.CamHH;
+        float hw = gm.CamHW;
         pos.x = Mathf.Clamp(pos.x, -hw + r, hw - r);
         pos.y = Mathf.Clamp(pos.y, -hh + r, hh - r);
 

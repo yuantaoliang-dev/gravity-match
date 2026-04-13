@@ -34,6 +34,7 @@ public class GameManager : MonoBehaviour
     private MatchSystem matchSystem;
     private BlackHoleController blackHoleController;
     private LevelManager levelManager;
+    private FXPool fxPool;
 
     // ===== INTERNAL STATE =====
     private Camera cam;
@@ -49,13 +50,19 @@ public class GameManager : MonoBehaviour
     public Color currentColor { get; private set; }
     public Color nextColor { get; private set; }
 
+    // Cached camera bounds (set once in Start)
+    public float CamHH { get; private set; } // half-height
+    public float CamHW { get; private set; } // half-width
+
     void Awake()
     {
         Instance = this;
 
         // Create subsystems
+        fxPool = gameObject.AddComponent<FXPool>();
+        fxPool.Init();
         matchSystem = gameObject.AddComponent<MatchSystem>();
-        matchSystem.Init(this);
+        matchSystem.Init(this, fxPool);
         blackHoleController = gameObject.AddComponent<BlackHoleController>();
         levelManager = gameObject.AddComponent<LevelManager>();
     }
@@ -73,6 +80,8 @@ public class GameManager : MonoBehaviour
         // Set camera to fit the game field
         // HTML: 480px height, WorldScale=1 → 480/100*1=4.8 full height → orthoSize=2.4
         cam.orthographicSize = 2.4f;
+        CamHH = cam.orthographicSize;
+        CamHW = CamHH * cam.aspect;
         cam.backgroundColor = new Color(0.04f, 0.05f, 0.08f);
         // Camera must be behind the sprites (z=-10) for near clip plane to work
         cam.transform.position = new Vector3(0, 0, -10f);
@@ -158,14 +167,10 @@ public class GameManager : MonoBehaviour
     /// </summary>
     void SpawnSuckGhost(Ball b)
     {
-        var go = new GameObject("SuckGhost");
+        var go = fxPool.Get(FXPool.FXType.SuckGhost, b.GetComponent<SpriteRenderer>().sprite);
         go.transform.position = b.transform.position;
-        var sr = go.AddComponent<SpriteRenderer>();
-        sr.sprite = b.GetComponent<SpriteRenderer>().sprite;
+        var sr = go.GetComponent<SpriteRenderer>();
         sr.color = b.ballColor;
-        sr.sortingOrder = 5;
-        var mat = GameConstants.CreateUnlitSpriteMaterial();
-        if (mat != null) sr.material = mat;
         float diam = GameConstants.BallRadius * 2f;
         go.transform.localScale = new Vector3(diam, diam, 1f);
         StartCoroutine(AnimateSuckGhost(go, sr, b.ballColor));
@@ -198,7 +203,7 @@ public class GameManager : MonoBehaviour
             elapsed += Time.deltaTime;
             yield return null;
         }
-        Destroy(go);
+        fxPool.Return(go);
     }
 
     // ===== SUBSYSTEM FORWARDS (Shooter.cs facade) =====
@@ -217,14 +222,19 @@ public class GameManager : MonoBehaviour
             foreach (var g in grp) visited.Add(g.id);
             if (grp.Count >= 2) paired.Add(b.ballColor);
         }
-        return paired.ToList();
+        return new List<Color>(paired);
     }
 
     public Color PickNextColor()
     {
         if (balls.Count == 0) return levelManager.GetCurrentLevelDef().colors[0];
         var pc = GetPairColors();
-        if (pc.Count == 0) pc = balls.Select(b => b.ballColor).Distinct().ToList();
+        if (pc.Count == 0)
+        {
+            var colorSet = new HashSet<Color>();
+            foreach (var b in balls) colorSet.Add(b.ballColor);
+            pc = new List<Color>(colorSet);
+        }
         if (pc.Count == 0) return levelManager.GetCurrentLevelDef().colors[0];
         if (pc.Count == 1) return pc[0];
 
@@ -242,7 +252,8 @@ public class GameManager : MonoBehaviour
             }
             weights.Add((c, Mathf.Max(w, 1f)));
         }
-        float total = weights.Sum(x => x.w);
+        float total = 0f;
+        foreach (var x in weights) total += x.w;
         float r = Random.Range(0f, total);
         float acc = 0;
         foreach (var (c, w) in weights) { acc += w; if (r <= acc) return c; }
@@ -253,7 +264,12 @@ public class GameManager : MonoBehaviour
     {
         if (balls.Count == 0) return;
         var pc = GetPairColors();
-        if (pc.Count == 0) pc = balls.Select(b => b.ballColor).Distinct().ToList();
+        if (pc.Count == 0)
+        {
+            var colorSet = new HashSet<Color>();
+            foreach (var b in balls) colorSet.Add(b.ballColor);
+            pc = new List<Color>(colorSet);
+        }
         if (pc.Count == 0) return;
         if (!pc.Contains(currentColor)) currentColor = pc[Random.Range(0, pc.Count)];
         if (!pc.Contains(nextColor)) nextColor = pc[Random.Range(0, pc.Count)];

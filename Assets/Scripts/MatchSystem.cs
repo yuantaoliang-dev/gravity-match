@@ -11,10 +11,12 @@ using System.Linq;
 public class MatchSystem : MonoBehaviour
 {
     private GameManager gm;
+    private FXPool fxPool;
 
-    public void Init(GameManager gm)
+    public void Init(GameManager gm, FXPool fxPool)
     {
         this.gm = gm;
+        this.fxPool = fxPool;
     }
 
     // ===== MATCH DETECTION =====
@@ -23,7 +25,14 @@ public class MatchSystem : MonoBehaviour
     public List<Ball> GetTouching(Ball b, float maxDist = -1)
     {
         if (maxDist < 0) maxDist = GameConstants.TouchDist;
-        return gm.Balls.Where(o => o.id != b.id && b.DistTo(o) <= maxDist).ToList();
+        float maxDistSq = maxDist * maxDist;
+        var result = new List<Ball>();
+        foreach (var o in gm.Balls)
+        {
+            if (o.id != b.id && b.SqrDistTo(o) <= maxDistSq)
+                result.Add(o);
+        }
+        return result;
     }
 
     /// <summary>BFS flood-fill to find all connected same-color balls.</summary>
@@ -89,19 +98,14 @@ public class MatchSystem : MonoBehaviour
         var matchIds = new HashSet<int>(matchGrp.Select(b => b.id));
         bool hasCone = matchCount >= 4 && coneAngle > 0;
 
-        // Create highlight rings for each target ball
+        // Create highlight rings for each target ball (pooled)
         var rings = new List<GameObject>();
         foreach (var b in targets)
         {
             if (b == null) continue;
-            var ring = new GameObject("HighlightRing");
+            var ring = fxPool.Get(FXPool.FXType.HighlightRing, b.GetComponent<SpriteRenderer>().sprite);
             ring.transform.SetParent(b.transform, false);
             ring.transform.localPosition = Vector3.zero;
-            var sr = ring.AddComponent<SpriteRenderer>();
-            sr.sprite = b.GetComponent<SpriteRenderer>().sprite;
-            sr.sortingOrder = 15;
-            var mat = GameConstants.CreateUnlitSpriteMaterial();
-            if (mat != null) sr.material = mat;
             rings.Add(ring);
         }
 
@@ -156,8 +160,15 @@ public class MatchSystem : MonoBehaviour
             yield return null;
         }
 
-        // Cleanup highlight FX
-        foreach (var ring in rings) if (ring != null) Destroy(ring);
+        // Cleanup highlight FX (return to pool)
+        foreach (var ring in rings)
+        {
+            if (ring != null)
+            {
+                ring.transform.SetParent(null, false);
+                fxPool.Return(ring);
+            }
+        }
         if (coneFxGo != null) Destroy(coneFxGo);
 
         // Phase 2: Remove balls + suck pause
@@ -202,7 +213,7 @@ public class MatchSystem : MonoBehaviour
     GameObject CreateConeFX(float baseAngle, float halfAngle)
     {
         Vector2 bhPos = gm.blackHole.position;
-        float outerR = Camera.main.orthographicSize * 2f;
+        float outerR = gm.CamHH * 2f;
         float midR = outerR * 0.3f;
         int arcSegs = 16;
 
@@ -279,8 +290,8 @@ public class MatchSystem : MonoBehaviour
         Vector2 tPos = target.transform.position;
         Vector2 bhPos = gm.blackHole.position;
         float od = GameConstants.OverlapDistance;
-        float hh = Camera.main.orthographicSize;
-        float hw = hh * Camera.main.aspect;
+        float hh = gm.CamHH;
+        float hw = gm.CamHW;
         float r = GameConstants.BallRadius;
 
         Vector2 bestPos = tPos + Vector2.right * od;
@@ -330,14 +341,9 @@ public class MatchSystem : MonoBehaviour
         foreach (var b in new[] { target, buddy })
         {
             if (b == null) continue;
-            var ring = new GameObject("BuddyRing");
+            var ring = fxPool.Get(FXPool.FXType.BuddyRing, b.GetComponent<SpriteRenderer>().sprite);
             ring.transform.SetParent(b.transform, false);
             ring.transform.localPosition = Vector3.zero;
-            var sr = ring.AddComponent<SpriteRenderer>();
-            sr.sprite = b.GetComponent<SpriteRenderer>().sprite;
-            sr.sortingOrder = 15;
-            var mat = GameConstants.CreateUnlitSpriteMaterial();
-            if (mat != null) sr.material = mat;
             rings.Add(ring);
         }
 
@@ -358,6 +364,13 @@ public class MatchSystem : MonoBehaviour
             elapsed += Time.deltaTime;
             yield return null;
         }
-        foreach (var ring in rings) if (ring != null) Destroy(ring);
+        foreach (var ring in rings)
+        {
+            if (ring != null)
+            {
+                ring.transform.SetParent(null, false);
+                fxPool.Return(ring);
+            }
+        }
     }
 }

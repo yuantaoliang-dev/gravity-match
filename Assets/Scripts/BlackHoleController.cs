@@ -1,6 +1,5 @@
 using UnityEngine;
 using System.Collections.Generic;
-using System.Linq;
 
 /// <summary>
 /// Handles black hole growth, visual updates (ring pulse), auto-absorb,
@@ -85,27 +84,35 @@ public class BlackHoleController : MonoBehaviour
         if (gm.state != GameManager.GameState.Play || gm.shooter.HasProjectile) return;
 
         Vector2 center = bhTransform.position;
+        float absThresh = EventHorizon + GameConstants.BallRadius * 0.5f;
+        float absThreshSq = absThresh * absThresh;
         var absIds = new HashSet<int>();
         foreach (var b in gm.Balls)
         {
-            if (b.DistTo(center) < EventHorizon + GameConstants.BallRadius * 0.5f)
+            if (b.SqrDistTo(center) < absThreshSq)
                 absIds.Add(b.id);
         }
         if (absIds.Count == 0) return;
 
         // Expand to touching neighbors
         float pullRange = EventHorizon + GameConstants.BallRadius * 2.5f;
+        float pullRangeSq = pullRange * pullRange;
         foreach (var b in gm.Balls)
         {
             if (absIds.Contains(b.id)) continue;
-            if (b.DistTo(center) > pullRange) continue;
+            if (b.SqrDistTo(center) > pullRangeSq) continue;
             foreach (var nb in gm.GetTouching(b))
             {
                 if (absIds.Contains(nb.id)) { absIds.Add(b.id); break; }
             }
         }
 
-        var absorbed = gm.Balls.Where(b => absIds.Contains(b.id)).ToList();
+        // Manual loop instead of LINQ .Where().ToList()
+        var absorbed = new List<Ball>();
+        foreach (var b in gm.Balls)
+        {
+            if (absIds.Contains(b.id)) absorbed.Add(b);
+        }
         gm.RemoveBalls(absorbed);
         gm.score += absorbed.Count * GameConstants.ScoreBHAbsorb;
         gm.ForceValidColors();

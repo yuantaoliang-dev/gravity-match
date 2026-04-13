@@ -38,4 +38,16 @@ public class Ball : MonoBehaviour
     {
         return Vector2.Distance(transform.position, point);
     }
+
+    /// <summary>Squared distance to another ball (avoids sqrt).</summary>
+    public float SqrDistTo(Ball other)
+    {
+        return ((Vector2)transform.position - (Vector2)other.transform.position).sqrMagnitude;
+    }
+
+    /// <summary>Squared distance to a point (avoids sqrt).</summary>
+    public float SqrDistTo(Vector2 point)
+    {
+        return ((Vector2)transform.position - point).sqrMagnitude;
+    }
 }
