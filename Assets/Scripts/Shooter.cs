@@ -213,21 +213,26 @@ public class Shooter : MonoBehaviour
     {
         if (gm.IsRotating) return;
 
-        // Ignore clicks on UI elements (buttons, panels)
-        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
-            return;
+        // Ignore touches on UI elements (supports both mouse and touch fingerId)
+        if (IsPointerOverUI()) return;
 
-        // Mouse/touch: press to aim, release to fire
-        if (Input.GetMouseButtonDown(0))
+        Vector2 inputScreenPos = GetInputScreenPosition();
+        Vector2 inputWorld = Camera.main.ScreenToWorldPoint(inputScreenPos);
+        Vector2 shooterPos = transform.position;
+
+        // Press to start aiming (only from lower half of screen to avoid accidental touches)
+        if (GetInputDown())
         {
-            aiming = true;
+            // Only start aiming if touch is in lower portion of screen
+            if (inputScreenPos.y < Screen.height * 0.55f)
+            {
+                aiming = true;
+            }
         }
 
         if (aiming)
         {
-            Vector2 mouseWorld = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-            Vector2 shooterPos = transform.position;
-            Vector2 dir = (mouseWorld - shooterPos).normalized;
+            Vector2 dir = (inputWorld - shooterPos).normalized;
 
             // Only allow upward shots
             if (dir.y > 0.05f)
@@ -243,13 +248,49 @@ public class Shooter : MonoBehaviour
             HideAimLine();
         }
 
-        if (Input.GetMouseButtonUp(0) && aiming)
+        if (GetInputUp() && aiming)
         {
             aiming = false;
             HideTrajectory();
             HideAimLine();
             if (aimDir.y > 0.05f) Fire(aimDir);
         }
+    }
+
+    // ===== INPUT HELPERS (mouse + touch compatible) =====
+
+    /// <summary>Check if pointer/touch just started this frame.</summary>
+    bool GetInputDown()
+    {
+        if (Input.touchCount > 0)
+            return Input.GetTouch(0).phase == TouchPhase.Began;
+        return Input.GetMouseButtonDown(0);
+    }
+
+    /// <summary>Check if pointer/touch just ended this frame.</summary>
+    bool GetInputUp()
+    {
+        if (Input.touchCount > 0)
+            return Input.GetTouch(0).phase == TouchPhase.Ended;
+        return Input.GetMouseButtonUp(0);
+    }
+
+    /// <summary>Get current pointer/touch screen position.</summary>
+    Vector2 GetInputScreenPosition()
+    {
+        if (Input.touchCount > 0)
+            return Input.GetTouch(0).position;
+        return Input.mousePosition;
+    }
+
+    /// <summary>Check if pointer is over a UI element (works for both mouse and touch).</summary>
+    bool IsPointerOverUI()
+    {
+        if (EventSystem.current == null) return false;
+        // For touch: pass fingerId; for mouse: no argument
+        if (Input.touchCount > 0)
+            return EventSystem.current.IsPointerOverGameObject(Input.GetTouch(0).fingerId);
+        return EventSystem.current.IsPointerOverGameObject();
     }
 
     void Fire(Vector2 dir)
