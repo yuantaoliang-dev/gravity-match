@@ -26,19 +26,18 @@ public class GameManager : MonoBehaviour
 
     // Subsystems
     private MatchSystem matchSystem;
+    private BlackHoleController blackHoleController;
 
     // Cached camera (Camera.main requires MainCamera tag)
     private Camera cam;
-    private SpriteRenderer bhRingSr;
 
     // Ball tracking
     private List<Ball> balls = new List<Ball>();
     private int nextBallId = 0;
 
-    // Black hole growth
-    private int bhAte = 0;
-    public float BHRadius => GameConstants.BHRadiusBase + bhAte * GameConstants.BHGrowthRadius;
-    public float BHEventHorizon => GameConstants.BHEventHorizonBase + bhAte * GameConstants.BHGrowthEH;
+    // Black hole (forwarded to BlackHoleController)
+    public float BHRadius => blackHoleController.Radius;
+    public float BHEventHorizon => blackHoleController.EventHorizon;
 
     // Field rotation
     private float fieldAngle = 0f;
@@ -64,6 +63,7 @@ public class GameManager : MonoBehaviour
         // Create subsystems
         matchSystem = gameObject.AddComponent<MatchSystem>();
         matchSystem.Init(this);
+        blackHoleController = gameObject.AddComponent<BlackHoleController>();
     }
 
     void Start()
@@ -92,44 +92,20 @@ public class GameManager : MonoBehaviour
             shooter.transform.position = new Vector3(0, 0.2f - 2.24f, 0);
         }
 
-        // Setup BlackHole visual
-        var bhSr = blackHole.GetComponent<SpriteRenderer>();
-        if (bhSr)
-        {
-            bhSr.color = new Color(0.06f, 0.06f, 0.10f, 1f);
-            bhSr.sortingOrder = -10;
-            var mat = GameConstants.CreateUnlitSpriteMaterial();
-            if (mat != null) bhSr.material = mat;
-
-            // Purple ring: child circle scaled slightly larger behind the dark center
-            var ringGo = new GameObject("BHRing");
-            ringGo.transform.SetParent(blackHole, false);
-            ringGo.transform.localScale = new Vector3(1.35f, 1.35f, 1f);
-            bhRingSr = ringGo.AddComponent<SpriteRenderer>();
-            bhRingSr.sprite = bhSr.sprite;  // same Circle sprite
-            bhRingSr.color = new Color(0.55f, 0.15f, 0.85f, 0.5f);
-            bhRingSr.sortingOrder = -11; // behind center
-            if (mat != null) bhRingSr.material = new Material(mat);
-        }
+        // Initialize BlackHole controller (handles visuals + growth)
+        blackHoleController.Init(this, blackHole);
 
         LoadLevel(0);
     }
 
     void Update()
     {
-        // Update BlackHole visual size + ring pulse
-        float bhDiam = BHRadius * 2f;
-        blackHole.localScale = new Vector3(bhDiam, bhDiam, 1f);
-        if (bhRingSr)
-        {
-            float pulse = 0.4f + 0.2f * Mathf.Sin(Time.time * 2.5f);
-            bhRingSr.color = new Color(0.55f, 0.15f, 0.85f, pulse);
-        }
+        blackHoleController.UpdateVisuals();
 
         if (state == GameState.Play)
         {
             ForceValidColors();
-            BHAutoAbsorb();
+            blackHoleController.AutoAbsorb();
         }
         else if (state == GameState.Rotating)
         {
@@ -147,7 +123,7 @@ public class GameManager : MonoBehaviour
         foreach (var b in balls) if (b != null) Destroy(b.gameObject);
         balls.Clear();
         nextBallId = 0;
-        bhAte = 0;
+        blackHoleController.ResetForLevel();
         score = 0;
         comboCount = 0;
         fieldAngle = 0f;
@@ -313,7 +289,7 @@ public class GameManager : MonoBehaviour
             b.gameObject.SetActive(false);
             Destroy(b.gameObject);
         }
-        bhAte += list.Count;
+        blackHoleController.OnBallsEaten(list.Count);
     }
 
     /// <summary>
@@ -485,50 +461,12 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // ===== BLACK HOLE AUTO-ABSORB =====
-    void BHAutoAbsorb()
-    {
-        if (state != GameState.Play || shooter.HasProjectile) return;
-
-        Vector2 center = blackHole.position;
-        var absIds = new HashSet<int>();
-        foreach (var b in balls)
-        {
-            if (b.DistTo(center) < BHEventHorizon + GameConstants.BallRadius * 0.5f)
-                absIds.Add(b.id);
-        }
-        if (absIds.Count == 0) return;
-
-        // Expand to touching neighbors
-        float pullRange = BHEventHorizon + GameConstants.BallRadius * 2.5f;
-        foreach (var b in balls)
-        {
-            if (absIds.Contains(b.id)) continue;
-            if (b.DistTo(center) > pullRange) continue;
-            foreach (var nb in GetTouching(b))
-            {
-                if (absIds.Contains(nb.id)) { absIds.Add(b.id); break; }
-            }
-        }
-
-        var absorbed = balls.Where(b => absIds.Contains(b.id)).ToList();
-        RemoveBalls(absorbed);
-        score += absorbed.Count * GameConstants.ScoreBHAbsorb;
-        ForceValidColors();
-        ui.UpdateHUD(ballsLeft, score, balls.Count);
-        CheckEnd();
-    }
-
-    public void OnProjectileAbsorbedByBH()
-    {
-        bhAte++;
-        comboCount = 0;
-        StartRotation();
-    }
+    // Black hole absorption forwarded to BlackHoleController
+    public void OnProjectileAbsorbedByBH() => blackHoleController.OnProjectileAbsorbed();
 
     // ===== WIN/LOSE =====
     // v21: only checks during 'play' state, not during rotation or pending match
-    void CheckEnd()
+    public void CheckEnd()
     {
         if (state != GameState.Play) return;
         if (balls.Count == 0)
