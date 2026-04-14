@@ -81,23 +81,32 @@ public class GameManager : MonoBehaviour
         // Tag it so Camera.main works elsewhere (e.g. Shooter)
         cam.gameObject.tag = "MainCamera";
 
-        // Set camera to fit the game field
-        // HTML: 480px height, WorldScale=1 → 480/100*1=4.8 full height → orthoSize=2.4
-        cam.orthographicSize = 2.4f;
-        CamHH = cam.orthographicSize;
-        CamHW = CamHH * cam.aspect;
+        // Adaptive camera: fix game width, adjust height for aspect ratio.
+        // Design basis: 9:16 portrait (aspect=0.5625), game width=2.7 world units
+        // On wider screens (16:9 landscape in editor), same width, less height.
+        // On taller screens (20:9 phone), same width, more height.
+        float designWidth = 2.7f; // game field width in world units
+        float aspect = cam.aspect; // width / height
+        CamHW = designWidth / 2f; // half-width fixed
+        CamHH = CamHW / aspect;   // half-height adapts to aspect
+        cam.orthographicSize = CamHH;
         cam.backgroundColor = new Color(0.04f, 0.05f, 0.08f);
-        // Camera must be behind the sprites (z=-10) for near clip plane to work
         cam.transform.position = new Vector3(0, 0, -10f);
 
-        // HTML: BY=H/2-20=220, center=240, BH 20px above → 20/100*1=0.2 units
-        blackHole.position = new Vector3(0, 0.2f, 0);
+        // Position BH and shooter relative to visible area.
+        // BH at 30% from top (upper 70% = play field, lower 30% = shoot zone)
+        float visibleHeight = CamHH * 2f;
+        float bhY = CamHH - visibleHeight * 0.35f; // 35% from top
+        blackHole.position = new Vector3(0, bhY, 0);
 
-        // HTML: SY=H-36=444, BY=220, offset=224px → 224/100*1=2.24 below BH
+        // Shooter at bottom with small margin
+        float shooterMargin = 0.3f * GameConstants.WorldScale;
         if (shooter)
         {
-            shooter.transform.position = new Vector3(0, 0.2f - 2.24f, 0);
+            shooter.transform.position = new Vector3(0, -CamHH + shooterMargin, 0);
         }
+
+        Debug.Log($"[GravityMatch] Screen adapt: aspect={aspect:F3}, orthoSize={CamHH:F2}, width={designWidth}, bhY={bhY:F2}");
 
         // Pre-warm ball pool
         for (int i = 0; i < BallPoolPrewarm; i++)

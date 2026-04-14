@@ -220,14 +220,10 @@ public class Shooter : MonoBehaviour
         Vector2 inputWorld = Camera.main.ScreenToWorldPoint(inputScreenPos);
         Vector2 shooterPos = transform.position;
 
-        // Press to start aiming (only from lower half of screen to avoid accidental touches)
+        // Press to start aiming
         if (GetInputDown())
         {
-            // Only start aiming if touch is in lower portion of screen
-            if (inputScreenPos.y < Screen.height * 0.55f)
-            {
-                aiming = true;
-            }
+            aiming = true;
         }
 
         if (aiming)

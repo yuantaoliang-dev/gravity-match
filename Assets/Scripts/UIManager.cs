@@ -84,20 +84,34 @@ public class UIManager : MonoBehaviour
     /// <summary>Position HUD elements at top of screen matching v21 layout.</summary>
     void SetupHUDLayout()
     {
-        // Disable raycast on all HUD elements (they block buttons)
+        // Disable raycast on HUD panel and texts (so they don't block Levels button)
         var hudPanel = ballsText?.transform.parent;
         if (hudPanel != null)
         {
             var hudImg = hudPanel.GetComponent<Image>();
             if (hudImg) hudImg.raycastTarget = false;
         }
-        // Disable raycast on all TMP texts in the canvas
         var canvas = GetComponentInParent<Canvas>();
         if (canvas == null) canvas = FindFirstObjectByType<Canvas>();
         if (canvas != null)
         {
             foreach (var tmp in canvas.GetComponentsInChildren<TextMeshProUGUI>(true))
                 tmp.raycastTarget = false;
+
+            // Invisible touch blocker over HUD area — prevents game input
+            // from firing through score/balls/targets text
+            var blockerGo = new GameObject("HUDTouchBlocker");
+            blockerGo.transform.SetParent(canvas.transform, false);
+            var blockerRT = blockerGo.AddComponent<RectTransform>();
+            blockerRT.anchorMin = new Vector2(0, 1);
+            blockerRT.anchorMax = new Vector2(1, 1);
+            blockerRT.offsetMin = new Vector2(0, -50); // 50px tall strip at top
+            blockerRT.offsetMax = Vector2.zero;
+            var blockerImg = blockerGo.AddComponent<Image>();
+            blockerImg.color = new Color(0, 0, 0, 0); // fully transparent
+            blockerImg.raycastTarget = true; // blocks touch events
+            // Place behind Levels button but above game
+            blockerGo.transform.SetAsFirstSibling();
         }
         // Level name: top center
         if (levelNameText)
