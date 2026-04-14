@@ -25,6 +25,11 @@ public class Shooter : MonoBehaviour
     private List<SpriteRenderer> trajDots = new List<SpriteRenderer>();
     private List<Vector2> trajPoints = new List<Vector2>(400);
 
+    // Shooter area visuals
+    private SpriteRenderer breathingGlow;
+    private SpriteRenderer colorGlow;
+    private TMPro.TextMeshPro remainingCountTMP;
+
     // Combo display (right side of shooter)
     private GameObject comboDisplay;
     private TMPro.TextMeshPro comboText;
@@ -34,19 +39,14 @@ public class Shooter : MonoBehaviour
     {
         var mat = GameConstants.CreateUnlitSpriteMaterial();
 
-        // Shooter platform indicator
+        // Hide shooter platform sprite (v21 has no platform indicator)
         var sr = GetComponent<SpriteRenderer>();
-        if (sr)
-        {
-            sr.color = new Color(0.4f, 0.45f, 0.55f, 0.35f);
-            sr.sortingOrder = -5;
-            if (mat != null) sr.material = new Material(mat);
-        }
+        if (sr) sr.enabled = false;
 
-        // Setup ball color displays (match HTML: current at center, next to LEFT)
+        // Setup shooter area displays matching v21 layout
         float br = GameConstants.BallRadius;
         float ballDiam = br * 2f;
-        float curSize = (br + 0.02f * GameConstants.WorldScale) * 2f; // HTML: BR+2 radius
+        float curSize = (br + 0.02f * GameConstants.WorldScale) * 2f; // v21: BR+2 radius
         if (currentBallDisplay)
         {
             currentBallDisplay.transform.localPosition = Vector3.zero;
@@ -54,7 +54,7 @@ public class Shooter : MonoBehaviour
             currentBallDisplay.sortingOrder = 5;
             if (mat != null) currentBallDisplay.material = new Material(mat);
 
-            // White outline ring behind current ball (HTML: BR+5 stroke)
+            // v21: outer white ring (BR+5, alpha 0.25)
             var outlineGo = new GameObject("CurrentOutline");
             outlineGo.transform.SetParent(transform, false);
             outlineGo.transform.localPosition = Vector3.zero;
@@ -65,15 +65,47 @@ public class Shooter : MonoBehaviour
             outlineSr.color = new Color(1f, 1f, 1f, 0.25f);
             outlineSr.sortingOrder = 4;
             if (mat != null) outlineSr.material = new Material(mat);
+
+            // v21: breathing glow ring (BR+6+pulse*2, animated in UpdateDisplay)
+            var glowGo = new GameObject("BreathingGlow");
+            glowGo.transform.SetParent(transform, false);
+            glowGo.transform.localPosition = Vector3.zero;
+            breathingGlow = glowGo.AddComponent<SpriteRenderer>();
+            breathingGlow.sprite = currentBallDisplay.sprite;
+            breathingGlow.sortingOrder = 3;
+            if (mat != null) breathingGlow.material = new Material(mat);
+
+            // v21: color glow behind ball (BR+10, same color, low alpha)
+            var colorGlowGo = new GameObject("ColorGlow");
+            colorGlowGo.transform.SetParent(transform, false);
+            colorGlowGo.transform.localPosition = Vector3.zero;
+            float colorGlowSize = (br + 0.10f * GameConstants.WorldScale) * 2f;
+            colorGlowGo.transform.localScale = new Vector3(colorGlowSize, colorGlowSize, 1f);
+            colorGlow = colorGlowGo.AddComponent<SpriteRenderer>();
+            colorGlow.sprite = currentBallDisplay.sprite;
+            colorGlow.sortingOrder = 2;
+            if (mat != null) colorGlow.material = new Material(mat);
         }
         if (nextBallDisplay)
         {
-            // HTML: nxX = SX - BR*9, scaled to Unity view
+            // v21: nxX = SX - BR*9 (left of shooter)
             float nxOffset = -br * 5f;
             nextBallDisplay.transform.localPosition = new Vector3(nxOffset, 0, 0);
             nextBallDisplay.transform.localScale = new Vector3(ballDiam, ballDiam, 1f);
             nextBallDisplay.sortingOrder = 5;
             if (mat != null) nextBallDisplay.material = new Material(mat);
+
+            // v21: remaining count text below next ball (nxX, nxY + BR + 12)
+            var remGo = new GameObject("RemainingCount");
+            remGo.transform.SetParent(transform, false);
+            remGo.transform.localPosition = new Vector3(nxOffset, -br - 0.06f, 0);
+            remainingCountTMP = remGo.AddComponent<TMPro.TextMeshPro>();
+            remainingCountTMP.fontSize = 1.2f;
+            remainingCountTMP.fontStyle = TMPro.FontStyles.Bold;
+            remainingCountTMP.alignment = TMPro.TextAlignmentOptions.Center;
+            remainingCountTMP.sortingOrder = 10;
+            var remRT = remGo.GetComponent<RectTransform>();
+            remRT.sizeDelta = new Vector2(0.3f, 0.1f);
         }
 
         // Create trajectory LineRenderer programmatically
@@ -633,15 +665,40 @@ public class Shooter : MonoBehaviour
 
     void UpdateDisplay()
     {
-        // Hide current ball when no balls left
+        bool showCurrent = gm.ballsLeft > 0 || projectile != null;
+        float br = GameConstants.BallRadius;
+
+        // Current ball + breathing glow
         if (currentBallDisplay)
         {
-            bool showCurrent = gm.ballsLeft > 0 || projectile != null;
             currentBallDisplay.gameObject.SetActive(showCurrent);
             if (showCurrent) currentBallDisplay.color = gm.currentColor;
         }
+        if (breathingGlow)
+        {
+            breathingGlow.gameObject.SetActive(showCurrent);
+            if (showCurrent)
+            {
+                // v21: shipPulse = 0.5 + 0.5 * sin(Date.now() * 0.004)
+                float pulse = 0.5f + 0.5f * Mathf.Sin(Time.time * 4f);
+                float glowSize = (br + (0.06f + pulse * 0.02f) * GameConstants.WorldScale) * 2f;
+                breathingGlow.transform.localScale = new Vector3(glowSize, glowSize, 1f);
+                breathingGlow.color = new Color(1f, 1f, 1f, 0.12f + pulse * 0.12f);
+            }
+        }
+        if (colorGlow)
+        {
+            colorGlow.gameObject.SetActive(showCurrent);
+            if (showCurrent)
+            {
+                float pulse = 0.5f + 0.5f * Mathf.Sin(Time.time * 4f);
+                Color gc = gm.currentColor;
+                gc.a = 0.15f + pulse * 0.1f;
+                colorGlow.color = gc;
+            }
+        }
 
-        // Hide next ball when 1 or fewer balls left
+        // Next ball (half-transparent)
         if (nextBallDisplay)
         {
             bool showNext = gm.ballsLeft > 1;
@@ -651,6 +708,28 @@ public class Shooter : MonoBehaviour
                 Color nc = gm.nextColor;
                 nc.a = 0.5f;
                 nextBallDisplay.color = nc;
+            }
+        }
+
+        // Remaining ball count below next ball
+        if (remainingCountTMP)
+        {
+            remainingCountTMP.gameObject.SetActive(showCurrent);
+            if (showCurrent)
+            {
+                remainingCountTMP.text = gm.ballsLeft.ToString();
+                // v21: ≤5 red flash, ≤10 orange, ≤15 yellow, else dim white
+                if (gm.ballsLeft <= 5)
+                {
+                    float flash = 0.5f + 0.5f * Mathf.Abs(Mathf.Sin(Time.time * 6f));
+                    remainingCountTMP.color = new Color(0.973f, 0.318f, 0.286f, flash);
+                }
+                else if (gm.ballsLeft <= 10)
+                    remainingCountTMP.color = new Color(0.937f, 0.624f, 0.153f);
+                else if (gm.ballsLeft <= 15)
+                    remainingCountTMP.color = new Color(1f, 0.902f, 0.427f);
+                else
+                    remainingCountTMP.color = new Color(1f, 1f, 1f, 0.45f);
             }
         }
     }
