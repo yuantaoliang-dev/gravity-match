@@ -335,6 +335,7 @@ public class Shooter : MonoBehaviour
         ball.Init(-1, gm.currentColor);
         projVelocity = dir * GameConstants.BallSpeed;
         projBounces = 0;
+        if (AudioManager.Instance) AudioManager.Instance.PlayShoot();
 
         gm.OnBallFired();
     }
@@ -372,9 +373,12 @@ public class Shooter : MonoBehaviour
                 float hh = gm.CamHH;
                 float hw = gm.CamHW;
                 float r = GameConstants.BallRadius;
+                int prevBounces = projBounces;
                 if (pos.x - r <= -hw) { pos.x = -hw + r; projVelocity.x *= -1; subVel.x *= -1; projBounces++; }
                 if (pos.x + r >= hw) { pos.x = hw - r; projVelocity.x *= -1; subVel.x *= -1; projBounces++; }
                 if (pos.y + r >= hh) { pos.y = hh - r; projVelocity.y *= -1; subVel.y *= -1; projBounces++; }
+                if (projBounces > prevBounces && AudioManager.Instance)
+                    AudioManager.Instance.PlayBounce();
 
                 if (projBounces > GameConstants.MaxBounces || pos.y < transform.position.y - 0.2f)
                 {
@@ -500,6 +504,7 @@ public class Shooter : MonoBehaviour
                     }
 
                     var newBall = gm.SpawnBall(newPos, projColor);
+                    if (AudioManager.Instance) AudioManager.Instance.PlayAttach();
                     ProcessMatch(newBall);
                     return;
                 }

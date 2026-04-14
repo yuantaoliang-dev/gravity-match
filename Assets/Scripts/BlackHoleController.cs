@@ -127,6 +127,7 @@ public class BlackHoleController : MonoBehaviour
     {
         bhAte++;
         gm.comboCount = 0;
+        if (AudioManager.Instance) AudioManager.Instance.PlayBHAbsorb();
         gm.StartRotation();
     }
 }

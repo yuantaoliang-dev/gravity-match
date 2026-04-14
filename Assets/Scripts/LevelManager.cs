@@ -186,11 +186,13 @@ public class LevelManager : MonoBehaviour
             int stars = gm.score >= lv.starScore3 ? 3 : gm.score >= lv.starScore2 ? 2 : 1;
             levelStars[CurrentLevel] = Mathf.Max(levelStars[CurrentLevel], stars);
             bool hasNext = CurrentLevel < levels.Count - 1;
+            if (AudioManager.Instance) AudioManager.Instance.PlayWin();
             gm.ui.ShowWin(stars, gm.score, gm.ballsLeft, hasNext);
         }
         else if (gm.ballsLeft <= 0 && !gm.shooter.HasProjectile)
         {
             gm.state = GameManager.GameState.Lost;
+            if (AudioManager.Instance) AudioManager.Instance.PlayLose();
             gm.ui.ShowLose(gm.Balls.Count);
         }
     }

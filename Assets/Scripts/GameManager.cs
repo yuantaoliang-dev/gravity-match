@@ -63,6 +63,7 @@ public class GameManager : MonoBehaviour
         Instance = this;
 
         // Create subsystems
+        gameObject.AddComponent<AudioManager>();
         fxPool = gameObject.AddComponent<FXPool>();
         fxPool.Init();
         matchSystem = gameObject.AddComponent<MatchSystem>();
