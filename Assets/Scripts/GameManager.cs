@@ -74,6 +74,9 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
+        // Show splash screen overlay
+        SplashScreen.ShowOnCurrentScene();
+
         // Find camera (Camera.main needs MainCamera tag which may not be set)
         cam = Camera.main;
         if (!cam) cam = FindFirstObjectByType<Camera>();
