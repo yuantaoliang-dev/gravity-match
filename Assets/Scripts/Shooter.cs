@@ -21,6 +21,8 @@ public class Shooter : MonoBehaviour
     private bool uiTouchBlocked; // Tracks if current touch started on UI
     private Vector2 aimDir;
     private Camera mainCamera; // Cached to avoid per-frame Camera.main lookup
+    private int activeTouchId = -1; // Tracks which finger we're following (-1 = none)
+    private bool activeMouse; // True while currently tracked left-click is held
 
     // Trajectory dot pool (v21 style: small circles with fading alpha)
     private const int MaxTrajDots = 100;
@@ -259,16 +261,66 @@ public class Shooter : MonoBehaviour
     /// </summary>
     void PollInputDuringRotation()
     {
-        bool isTouching = Input.touchCount > 0;
-        bool pressed = isTouching || Input.GetMouseButton(0);
+        // Track input the same way as HandleInput — require a Began touch or
+        // a MouseDown to start aiming. Don't pick up lingering touches.
+        Vector2 inputScreenPos = Vector2.zero;
+        bool pressed = false;
+
+        if (Input.touchCount > 0)
+        {
+            // Is our tracked finger still down?
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                var t = Input.GetTouch(i);
+                if (t.fingerId == activeTouchId &&
+                    t.phase != TouchPhase.Ended && t.phase != TouchPhase.Canceled)
+                {
+                    inputScreenPos = t.position;
+                    pressed = true;
+                    break;
+                }
+            }
+            // If not tracking anyone yet, look for a fresh Began
+            if (!pressed && activeTouchId < 0)
+            {
+                for (int i = 0; i < Input.touchCount; i++)
+                {
+                    var t = Input.GetTouch(i);
+                    if (t.phase == TouchPhase.Began)
+                    {
+                        activeTouchId = t.fingerId;
+                        inputScreenPos = t.position;
+                        pressed = true;
+                        break;
+                    }
+                }
+            }
+        }
+        else
+        {
+            activeTouchId = -1;
+            if (activeMouse && Input.GetMouseButton(0))
+            {
+                inputScreenPos = Input.mousePosition;
+                pressed = true;
+            }
+            else if (Input.GetMouseButtonDown(0))
+            {
+                activeMouse = true;
+                inputScreenPos = Input.mousePosition;
+                pressed = true;
+            }
+            else if (!Input.GetMouseButton(0))
+            {
+                activeMouse = false;
+            }
+        }
 
         if (pressed)
         {
-            // Cache camera
             if (mainCamera == null) mainCamera = Camera.main;
             if (mainCamera == null) return;
 
-            // Starting a new drag during rotation?
             if (!aiming)
             {
                 if (IsPointerOverUI()) { uiTouchBlocked = true; return; }
@@ -276,10 +328,6 @@ public class Shooter : MonoBehaviour
                 uiTouchBlocked = false;
             }
 
-            // Update aim direction and show trajectory for visual feedback
-            Vector2 inputScreenPos = isTouching
-                ? (Vector2)Input.GetTouch(0).position
-                : (Vector2)Input.mousePosition;
             Vector2 inputWorld = mainCamera.ScreenToWorldPoint(inputScreenPos);
             Vector2 shooterPos = transform.position;
             Vector2 offset = inputWorld - shooterPos;
@@ -318,30 +366,71 @@ public class Shooter : MonoBehaviour
 
     void HandleInput()
     {
-        // Allow aiming during rotation; fire is deferred until Play state
-
         // Detect input events (touch takes priority over mouse).
-        // For touch: treat "just started aiming" as first frame we see ANY touch
-        // (not just TouchPhase.Began, which may be missed between frames).
-        bool isTouching = Input.touchCount > 0;
+        // Use touch ID tracking to avoid treating a lingering pre-existing touch
+        // (e.g. finger still down from a UI button tap) as a new shoot gesture.
         bool justDown = false;
         bool justUp = false;
+        Vector2 inputScreenPos = Vector2.zero;
 
-        if (isTouching)
+        if (Input.touchCount > 0)
         {
-            var t = Input.GetTouch(0);
-            // New touch: either Began phase OR we weren't aiming and now have any touch
-            justDown = t.phase == TouchPhase.Began || (!aiming && !uiTouchBlocked);
-            justUp = t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled;
+            // Find our tracked finger (if still present)
+            Touch? tracked = null;
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                var touch = Input.GetTouch(i);
+                if (touch.fingerId == activeTouchId) { tracked = touch; break; }
+            }
+
+            if (tracked.HasValue)
+            {
+                // Still following the same finger
+                inputScreenPos = tracked.Value.position;
+                justUp = tracked.Value.phase == TouchPhase.Ended || tracked.Value.phase == TouchPhase.Canceled;
+            }
+            else
+            {
+                // Look for a NEW Began touch to start tracking
+                for (int i = 0; i < Input.touchCount; i++)
+                {
+                    var touch = Input.GetTouch(i);
+                    if (touch.phase == TouchPhase.Began)
+                    {
+                        activeTouchId = touch.fingerId;
+                        inputScreenPos = touch.position;
+                        justDown = true;
+                        break;
+                    }
+                }
+            }
+        }
+        else if (activeTouchId >= 0)
+        {
+            // Tracked touch disappeared (e.g. system gesture canceled it)
+            activeTouchId = -1;
+            justUp = aiming;
         }
         else
         {
-            justDown = Input.GetMouseButtonDown(0);
-            justUp = Input.GetMouseButtonUp(0);
-            // Touch released between frames (was aiming, now no touch)
-            if (aiming && !justUp && Input.touchCount == 0 && !Input.GetMouseButton(0))
-                justUp = true;
+            // Mouse input (editor only)
+            if (Input.GetMouseButtonDown(0))
+            {
+                activeMouse = true;
+                justDown = true;
+            }
+            if (activeMouse)
+            {
+                inputScreenPos = Input.mousePosition;
+                if (Input.GetMouseButtonUp(0))
+                {
+                    justUp = true;
+                    activeMouse = false;
+                }
+            }
         }
+
+        bool isTouching = activeTouchId >= 0 || activeMouse;
 
         // Start aiming on press (skip if tapping UI)
         if (justDown && !aiming)
@@ -355,9 +444,6 @@ public class Shooter : MonoBehaviour
         // Update aim direction while dragging
         if (aiming)
         {
-            Vector2 inputScreenPos = isTouching
-                ? (Vector2)Input.GetTouch(0).position
-                : (Vector2)Input.mousePosition;
             if (mainCamera == null) mainCamera = Camera.main;
             if (mainCamera == null) return;
             Vector2 inputWorld = mainCamera.ScreenToWorldPoint(inputScreenPos);

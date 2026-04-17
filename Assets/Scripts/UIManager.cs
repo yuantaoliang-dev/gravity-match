@@ -29,6 +29,9 @@ public class UIManager : MonoBehaviour
     private LevelSelectView levelSelectView;
     private Button levelsButton;
 
+    // Exit confirmation dialog
+    private ExitConfirmDialog exitDialog;
+
     // Center reward text (v21 "showRw")
     private TextMeshProUGUI rewardText;
     private float rewardTimer;
@@ -352,10 +355,16 @@ public class UIManager : MonoBehaviour
             }
             else if (rewardTimer < 0.3f)
             {
-                // Fade out in last 0.3s
                 float a = rewardTimer / 0.3f;
                 rewardText.color = new Color(rewardText.color.r, rewardText.color.g, rewardText.color.b, a);
             }
+        }
+
+        // Android Back button / Escape: open exit dialog (or close if open)
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (IsExitDialogOpen) HideExitDialog();
+            else ShowExitDialog();
         }
     }
 
@@ -396,7 +405,52 @@ public class UIManager : MonoBehaviour
 
         // Create level select view (handles panel, grid, buttons)
         levelSelectView = LevelSelectView.Create(safeAreaRoot ?? canvas.transform);
+
+        // "Exit" button at top-right corner
+        CreateExitButton(canvas);
+
+        // Exit confirmation dialog (hidden by default)
+        exitDialog = ExitConfirmDialog.Create(safeAreaRoot ?? canvas.transform);
     }
+
+    void CreateExitButton(Canvas canvas)
+    {
+        var btnGo = new GameObject("ExitButton");
+        btnGo.transform.SetParent(safeAreaRoot ?? canvas.transform, false);
+        var btnRT = btnGo.AddComponent<RectTransform>();
+        btnRT.anchorMin = new Vector2(1, 1);
+        btnRT.anchorMax = new Vector2(1, 1);
+        btnRT.anchoredPosition = new Vector2(-30, -8);
+        btnRT.sizeDelta = new Vector2(50, 18);
+        var btnImg = btnGo.AddComponent<Image>();
+        btnImg.color = new Color(1, 1, 1, 0.1f);
+        var btn = btnGo.AddComponent<Button>();
+        btn.onClick.AddListener(ShowExitDialog);
+        btnGo.transform.SetAsLastSibling();
+
+        var textGo = new GameObject("Text");
+        textGo.transform.SetParent(btnGo.transform, false);
+        var textRT = textGo.AddComponent<RectTransform>();
+        textRT.anchorMin = Vector2.zero;
+        textRT.anchorMax = Vector2.one;
+        textRT.offsetMin = Vector2.zero;
+        textRT.offsetMax = Vector2.zero;
+        var text = textGo.AddComponent<TextMeshProUGUI>();
+        text.text = "Exit";
+        text.fontSize = 12;
+        text.fontStyle = FontStyles.Bold;
+        text.alignment = TextAlignmentOptions.Center;
+        text.color = new Color(1, 1, 1, 0.6f);
+    }
+
+    /// <summary>Show the exit confirmation dialog. Also called from Back button.</summary>
+    public void ShowExitDialog()
+    {
+        if (exitDialog != null) exitDialog.Show();
+    }
+
+    public bool IsExitDialogOpen => exitDialog != null && exitDialog.IsOpen;
+    public void HideExitDialog() { if (exitDialog != null) exitDialog.Hide(); }
 
     public void ShowLevelSelect()
     {
