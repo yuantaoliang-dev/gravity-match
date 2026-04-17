@@ -22,6 +22,9 @@ public class UIManager : MonoBehaviour
     [Header("Remaining Warning")]
     public TextMeshProUGUI remainingCount;
 
+    // Safe area root (all UI goes under this)
+    private Transform safeAreaRoot;
+
     // Level select (managed by LevelSelectView)
     private LevelSelectView levelSelectView;
     private Button levelsButton;
@@ -58,6 +61,7 @@ public class UIManager : MonoBehaviour
         }
 
         SetupCanvasScaler();
+        SetupSafeAreaPanel();
         SetupHUDLayout();
         SetupOverlayLayout();
         CreateRewardText();
@@ -81,6 +85,44 @@ public class UIManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Create an empty SafeArea panel (anchored to screen safe area).
+    /// Only used as parent for dynamically created UI. Scene elements
+    /// stay under Canvas and get safe-area offsets in SetupHUDLayout.
+    /// </summary>
+    void SetupSafeAreaPanel()
+    {
+        var canvas = GetComponentInParent<Canvas>();
+        if (canvas == null) canvas = FindFirstObjectByType<Canvas>();
+        if (canvas == null) return;
+
+        var safeGo = new GameObject("SafeAreaPanel");
+        safeGo.transform.SetParent(canvas.transform, false);
+        var safeRT = safeGo.AddComponent<RectTransform>();
+
+        Rect safe = Screen.safeArea;
+        safeRT.anchorMin = new Vector2(safe.x / Screen.width, safe.y / Screen.height);
+        safeRT.anchorMax = new Vector2(safe.xMax / Screen.width, safe.yMax / Screen.height);
+        safeRT.offsetMin = Vector2.zero;
+        safeRT.offsetMax = Vector2.zero;
+
+        safeAreaRoot = safeRT;
+    }
+
+    /// <summary>Get safe area top inset as normalized fraction (0-1) of screen height.</summary>
+    float GetSafeAreaTopRatio()
+    {
+        Rect safe = Screen.safeArea;
+        return (Screen.height - safe.yMax) / Screen.height;
+    }
+
+    /// <summary>Get safe area bottom inset as normalized fraction (0-1) of screen height.</summary>
+    float GetSafeAreaBottomRatio()
+    {
+        Rect safe = Screen.safeArea;
+        return safe.yMin / Screen.height;
+    }
+
     /// <summary>Position HUD elements at top of screen matching v21 layout.</summary>
     void SetupHUDLayout()
     {
@@ -98,22 +140,8 @@ public class UIManager : MonoBehaviour
             foreach (var tmp in canvas.GetComponentsInChildren<TextMeshProUGUI>(true))
                 tmp.raycastTarget = false;
 
-            // Invisible touch blocker over HUD area — prevents game input
-            // from firing through score/balls/targets text
-            var blockerGo = new GameObject("HUDTouchBlocker");
-            blockerGo.transform.SetParent(canvas.transform, false);
-            var blockerRT = blockerGo.AddComponent<RectTransform>();
-            blockerRT.anchorMin = new Vector2(0, 1);
-            blockerRT.anchorMax = new Vector2(1, 1);
-            blockerRT.offsetMin = new Vector2(0, -50); // 50px tall strip at top
-            blockerRT.offsetMax = Vector2.zero;
-            var blockerImg = blockerGo.AddComponent<Image>();
-            blockerImg.color = new Color(0, 0, 0, 0); // fully transparent
-            blockerImg.raycastTarget = true; // blocks touch events
-            // Place behind Levels button but above game
-            blockerGo.transform.SetAsFirstSibling();
         }
-        // Level name: top center
+        // Level name: top center (canvas is within safe area via renderOutsideSafeArea=false)
         if (levelNameText)
         {
             var rt = levelNameText.GetComponent<RectTransform>();
@@ -144,7 +172,7 @@ public class UIManager : MonoBehaviour
         var canvas = GetComponentInParent<Canvas>();
         if (canvas == null) canvas = FindFirstObjectByType<Canvas>();
 
-        // Value text
+        // Value text (canvas is within safe area)
         var rt = valueText.GetComponent<RectTransform>();
         rt.anchorMin = new Vector2(anchorX, 1);
         rt.anchorMax = new Vector2(anchorX, 1);
@@ -156,7 +184,7 @@ public class UIManager : MonoBehaviour
 
         // Label above value (v21: small monospace label)
         var labelGo = new GameObject($"Label_{label}");
-        labelGo.transform.SetParent(canvas.transform, false);
+        labelGo.transform.SetParent(safeAreaRoot ?? canvas.transform, false);
         var labelRT = labelGo.AddComponent<RectTransform>();
         labelRT.anchorMin = new Vector2(anchorX, 1);
         labelRT.anchorMax = new Vector2(anchorX, 1);
@@ -286,7 +314,7 @@ public class UIManager : MonoBehaviour
         if (canvas == null) return;
 
         var go = new GameObject("RewardText");
-        go.transform.SetParent(canvas.transform, false);
+        go.transform.SetParent(safeAreaRoot ?? canvas.transform, false);
         var rt = go.AddComponent<RectTransform>();
         // v21: positioned at top 35% of screen
         rt.anchorMin = new Vector2(0.5f, 0.65f);
@@ -340,7 +368,7 @@ public class UIManager : MonoBehaviour
 
         // "Levels" button at top-left corner
         var btnGo = new GameObject("LevelsButton");
-        btnGo.transform.SetParent(canvas.transform, false);
+        btnGo.transform.SetParent(safeAreaRoot ?? canvas.transform, false);
         var btnRT = btnGo.AddComponent<RectTransform>();
         btnRT.anchorMin = new Vector2(0, 1);
         btnRT.anchorMax = new Vector2(0, 1);
@@ -367,7 +395,7 @@ public class UIManager : MonoBehaviour
         btnText.color = new Color(1, 1, 1, 0.6f);
 
         // Create level select view (handles panel, grid, buttons)
-        levelSelectView = LevelSelectView.Create(canvas.transform);
+        levelSelectView = LevelSelectView.Create(safeAreaRoot ?? canvas.transform);
     }
 
     public void ShowLevelSelect()

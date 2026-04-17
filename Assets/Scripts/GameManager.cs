@@ -74,6 +74,9 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
+        // Don't use immersive mode — we WANT system bars to take their space
+        // so Screen.safeArea properly excludes them and our content stays visible.
+
         // Show splash screen overlay
         SplashScreen.ShowOnCurrentScene();
 
@@ -97,18 +100,33 @@ public class GameManager : MonoBehaviour
         cam.backgroundColor = new Color(0.04f, 0.05f, 0.08f);
         cam.transform.position = new Vector3(0, 0, -10f);
 
-        // Position BH and shooter relative to visible area.
-        // BH at 30% from top (upper 70% = play field, lower 30% = shoot zone)
+        // Reserve large bottom margin for Android navigation bar (gesture/3-button).
+        // Use both Screen.safeArea AND a minimum fixed margin as a safety net,
+        // because safeArea can return 0 inset on some devices/modes.
         float visibleHeight = CamHH * 2f;
-        float bhY = CamHH - visibleHeight * 0.35f; // 35% from top
+        Rect safeArea = Screen.safeArea;
+        float screenH = Screen.height;
+        float topInsetRatio = Mathf.Max((screenH - safeArea.yMax) / screenH, 0.04f);    // min 4% top
+        float bottomInsetRatio = Mathf.Max(safeArea.yMin / screenH, 0.08f);              // min 8% bottom (nav bar)
+        float topInset = topInsetRatio * visibleHeight;
+        float bottomInset = bottomInsetRatio * visibleHeight;
+
+        float safeTop = CamHH - topInset;
+        float safeBottom = -CamHH + bottomInset;
+        float safeHeight = safeTop - safeBottom;
+
+        // BH at 35% from safe top
+        float bhY = safeTop - safeHeight * 0.35f;
         blackHole.position = new Vector3(0, bhY, 0);
 
-        // Shooter at bottom with small margin
+        // Shooter at safe bottom with margin
         float shooterMargin = 0.3f * GameConstants.WorldScale;
         if (shooter)
         {
-            shooter.transform.position = new Vector3(0, -CamHH + shooterMargin, 0);
+            shooter.transform.position = new Vector3(0, safeBottom + shooterMargin, 0);
         }
+
+        Debug.Log($"[GravityMatch] SafeArea: topInset={topInset:F3}, bottomInset={bottomInset:F3}, bhY={bhY:F2}, shooterY={safeBottom + shooterMargin:F2}");
 
         Debug.Log($"[GravityMatch] Screen adapt: aspect={aspect:F3}, orthoSize={CamHH:F2}, width={designWidth}, bhY={bhY:F2}");
 
@@ -348,6 +366,32 @@ public class GameManager : MonoBehaviour
         rotationTarget = fieldAngle + GameConstants.FieldRotation;
         isRotating = true;
         state = GameState.Rotating;
+    }
+
+    /// <summary>
+    /// Instantly finish the current rotation (snap to target angle) and
+    /// transition to Play state. Used when player commits to a shot during
+    /// rotation — prevents the "stutter" of releasing as animation ends.
+    /// </summary>
+    public void SnapRotationAndFire()
+    {
+        if (!isRotating) return;
+
+        float remainingDiff = rotationTarget - fieldAngle;
+        Vector2 center = blackHole.position;
+        float rad = remainingDiff * Mathf.Deg2Rad;
+        foreach (var b in balls)
+        {
+            Vector2 offset = (Vector2)b.transform.position - center;
+            float a = Mathf.Atan2(offset.y, offset.x) + rad;
+            float d = offset.magnitude;
+            b.transform.position = center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * d;
+        }
+        fieldAngle = rotationTarget;
+        isRotating = false;
+        state = GameState.Play;
+        ForceValidColors();
+        ui.UpdateHUD(ballsLeft, score, balls.Count);
     }
 
     void UpdateRotation()

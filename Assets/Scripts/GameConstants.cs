@@ -47,7 +47,7 @@ public static class GameConstants
     public const float HighlightDuration = 0.37f;   // 22 frames @ 60fps
     public const float SuckDuration = 0.53f;         // 32 frames
     public const float BuddyFXDuration = 0.83f;      // 50 frames
-    public const float RotationEaseThreshold = 0.003f;
+    public const float RotationEaseThreshold = 0.1f;
 
     // Colors
     public static readonly Color Red = new Color(0.886f, 0.294f, 0.290f);    // #E24B4A

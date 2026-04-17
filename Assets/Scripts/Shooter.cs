@@ -18,7 +18,9 @@ public class Shooter : MonoBehaviour
     private Vector2 projVelocity;
     private int projBounces;
     private bool aiming;
+    private bool uiTouchBlocked; // Tracks if current touch started on UI
     private Vector2 aimDir;
+    private Camera mainCamera; // Cached to avoid per-frame Camera.main lookup
 
     // Trajectory dot pool (v21 style: small circles with fading alpha)
     private const int MaxTrajDots = 100;
@@ -230,44 +232,151 @@ public class Shooter : MonoBehaviour
         UpdateDisplay();
         UpdateComboDisplay();
 
-        if (gm.state != GameManager.GameState.Play) return;
         if (projectile != null)
         {
             UpdateProjectile();
+            return;
         }
-        else
+
+        // Handle input during Play state only (aim/shoot)
+        if (gm.state == GameManager.GameState.Play)
         {
             HandleInput();
+            return;
+        }
+
+        // During Rotating: also poll input, but only to remember the intent.
+        // When rotation ends (state becomes Play), we fire immediately.
+        if (gm.state == GameManager.GameState.Rotating)
+        {
+            PollInputDuringRotation();
+        }
+    }
+
+    /// <summary>
+    /// While rotating, track touch drag and remember direction.
+    /// If user releases during rotation, fire immediately when rotation ends.
+    /// </summary>
+    void PollInputDuringRotation()
+    {
+        bool isTouching = Input.touchCount > 0;
+        bool pressed = isTouching || Input.GetMouseButton(0);
+
+        if (pressed)
+        {
+            // Cache camera
+            if (mainCamera == null) mainCamera = Camera.main;
+            if (mainCamera == null) return;
+
+            // Starting a new drag during rotation?
+            if (!aiming)
+            {
+                if (IsPointerOverUI()) { uiTouchBlocked = true; return; }
+                aiming = true;
+                uiTouchBlocked = false;
+            }
+
+            // Update aim direction and show trajectory for visual feedback
+            Vector2 inputScreenPos = isTouching
+                ? (Vector2)Input.GetTouch(0).position
+                : (Vector2)Input.mousePosition;
+            Vector2 inputWorld = mainCamera.ScreenToWorldPoint(inputScreenPos);
+            Vector2 shooterPos = transform.position;
+            Vector2 offset = inputWorld - shooterPos;
+            float minUp = GameConstants.BallRadius * 2f;
+            if (offset.y >= minUp && offset.y > Mathf.Abs(offset.x) * 0.3f)
+            {
+                aimDir = offset.normalized;
+                ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
+                ShowAimLine(shooterPos, aimDir);
+            }
+            else
+            {
+                HideTrajectory();
+                HideAimLine();
+            }
+        }
+        else if (aiming)
+        {
+            // Released during rotation with valid aim: snap rotation to
+            // completion and fire immediately (skip remaining animation).
+            // Otherwise (no valid aim): abandon.
+            bool validAim = aimLine != null && aimLine.positionCount > 0;
+            Vector2 dir = aimDir;
+            aiming = false;
+            HideTrajectory();
+            HideAimLine();
+            uiTouchBlocked = false;
+
+            if (validAim)
+            {
+                gm.SnapRotationAndFire();
+                Fire(dir);
+            }
         }
     }
 
     void HandleInput()
     {
-        if (gm.IsRotating) return;
+        // Allow aiming during rotation; fire is deferred until Play state
 
-        // Ignore touches on UI elements (supports both mouse and touch fingerId)
-        if (IsPointerOverUI()) return;
+        // Detect input events (touch takes priority over mouse).
+        // For touch: treat "just started aiming" as first frame we see ANY touch
+        // (not just TouchPhase.Began, which may be missed between frames).
+        bool isTouching = Input.touchCount > 0;
+        bool justDown = false;
+        bool justUp = false;
 
-        Vector2 inputScreenPos = GetInputScreenPosition();
-        Vector2 inputWorld = Camera.main.ScreenToWorldPoint(inputScreenPos);
-        Vector2 shooterPos = transform.position;
-
-        // Press to start aiming
-        if (GetInputDown())
+        if (isTouching)
         {
-            aiming = true;
+            var t = Input.GetTouch(0);
+            // New touch: either Began phase OR we weren't aiming and now have any touch
+            justDown = t.phase == TouchPhase.Began || (!aiming && !uiTouchBlocked);
+            justUp = t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled;
+        }
+        else
+        {
+            justDown = Input.GetMouseButtonDown(0);
+            justUp = Input.GetMouseButtonUp(0);
+            // Touch released between frames (was aiming, now no touch)
+            if (aiming && !justUp && Input.touchCount == 0 && !Input.GetMouseButton(0))
+                justUp = true;
         }
 
+        // Start aiming on press (skip if tapping UI)
+        if (justDown && !aiming)
+        {
+            uiTouchBlocked = IsPointerOverUI();
+            Debug.Log($"[Shooter] Touch down: uiBlocked={uiTouchBlocked}, phase={(Input.touchCount > 0 ? Input.GetTouch(0).phase.ToString() : "mouse")}");
+            if (!uiTouchBlocked)
+                aiming = true;
+        }
+
+        // Update aim direction while dragging
         if (aiming)
         {
-            Vector2 dir = (inputWorld - shooterPos).normalized;
+            Vector2 inputScreenPos = isTouching
+                ? (Vector2)Input.GetTouch(0).position
+                : (Vector2)Input.mousePosition;
+            if (mainCamera == null) mainCamera = Camera.main;
+            if (mainCamera == null) return;
+            Vector2 inputWorld = mainCamera.ScreenToWorldPoint(inputScreenPos);
+            Vector2 shooterPos = transform.position;
+            Vector2 offset = inputWorld - shooterPos;
 
-            // Only allow upward shots
-            if (dir.y > 0.05f)
+            // Require touch to be clearly above shooter (at least 1 ball diameter up
+            // AND dominant y-component) to avoid firing on accidental side touches
+            float minUp = GameConstants.BallRadius * 2f;
+            if (offset.y >= minUp && offset.y > Mathf.Abs(offset.x) * 0.3f)
             {
-                aimDir = dir;
-                ShowTrajectory(shooterPos, dir * GameConstants.BallSpeed);
-                ShowAimLine(shooterPos, dir);
+                aimDir = offset.normalized;
+                ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
+                ShowAimLine(shooterPos, aimDir);
+            }
+            else
+            {
+                HideTrajectory();
+                HideAimLine();
             }
         }
         else
@@ -276,49 +385,44 @@ public class Shooter : MonoBehaviour
             HideAimLine();
         }
 
-        if (GetInputUp() && aiming)
+        // Fire on release (only if aim line was showing, i.e. valid direction)
+        if (justUp)
         {
-            aiming = false;
-            HideTrajectory();
-            HideAimLine();
-            if (aimDir.y > 0.05f) Fire(aimDir);
+            if (aiming)
+            {
+                bool validAim = aimLine != null && aimLine.positionCount > 0;
+                aiming = false;
+                HideTrajectory();
+                HideAimLine();
+                if (validAim) Fire(aimDir);
+            }
+            uiTouchBlocked = false;
         }
     }
 
-    // ===== INPUT HELPERS (mouse + touch compatible) =====
+    // Raycast helper reused to avoid allocation
+    private static readonly List<UnityEngine.EventSystems.RaycastResult> raycastResults = new();
+    private static UnityEngine.EventSystems.PointerEventData pointerEventData;
 
-    /// <summary>Check if pointer/touch just started this frame.</summary>
-    bool GetInputDown()
-    {
-        if (Input.touchCount > 0)
-            return Input.GetTouch(0).phase == TouchPhase.Began;
-        return Input.GetMouseButtonDown(0);
-    }
-
-    /// <summary>Check if pointer/touch just ended this frame.</summary>
-    bool GetInputUp()
-    {
-        if (Input.touchCount > 0)
-            return Input.GetTouch(0).phase == TouchPhase.Ended;
-        return Input.GetMouseButtonUp(0);
-    }
-
-    /// <summary>Get current pointer/touch screen position.</summary>
-    Vector2 GetInputScreenPosition()
-    {
-        if (Input.touchCount > 0)
-            return Input.GetTouch(0).position;
-        return Input.mousePosition;
-    }
-
-    /// <summary>Check if pointer is over a UI element (works for both mouse and touch).</summary>
+    /// <summary>
+    /// Check if pointer is over a UI element using manual GraphicRaycaster.
+    /// Avoids the first-frame bug of EventSystem.IsPointerOverGameObject(fingerId).
+    /// </summary>
     bool IsPointerOverUI()
     {
-        if (EventSystem.current == null) return false;
-        // For touch: pass fingerId; for mouse: no argument
-        if (Input.touchCount > 0)
-            return EventSystem.current.IsPointerOverGameObject(Input.GetTouch(0).fingerId);
-        return EventSystem.current.IsPointerOverGameObject();
+        var es = EventSystem.current;
+        if (es == null) return false;
+
+        Vector2 screenPos = Input.touchCount > 0
+            ? (Vector2)Input.GetTouch(0).position
+            : (Vector2)Input.mousePosition;
+
+        if (pointerEventData == null) pointerEventData = new UnityEngine.EventSystems.PointerEventData(es);
+        pointerEventData.position = screenPos;
+
+        raycastResults.Clear();
+        es.RaycastAll(pointerEventData, raycastResults);
+        return raycastResults.Count > 0;
     }
 
     void Fire(Vector2 dir)

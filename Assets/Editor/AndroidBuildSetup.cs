@@ -19,7 +19,7 @@ public static class AndroidBuildSetup
             UnityEditor.Build.NamedBuildTarget.Android, "com.lytastudio.gravitymatch");
 
         // API levels
-        PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24; // Android 7.0
+        PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel25; // Android 7.1
         PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevel34; // Android 14
 
         // Scripting backend: IL2CPP for performance
@@ -39,6 +39,12 @@ public static class AndroidBuildSetup
         // Screen orientation: portrait only
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.Portrait;
 
+        // Keep status bar visible (avoids transient overlay covering HUD)
+        PlayerSettings.statusBarHidden = false;
+
+        // Don't render under system bars — respect safe area
+        PlayerSettings.Android.renderOutsideSafeArea = false;
+
         // Icon setup (after running Generate App Assets)
         string iconPath = "Assets/Icons/app_icon.png";
         var iconTex = AssetDatabase.LoadAssetAtPath<Texture2D>(iconPath);
@@ -54,10 +60,12 @@ public static class AndroidBuildSetup
                 importer.SaveAndReimport();
             }
 
-            // Set as default icon
+            // Set as default icon (new API)
             var icons = new Texture2D[] { iconTex };
-            var iconSizes = new int[] { 512 };
-            PlayerSettings.SetIconsForTargetGroup(BuildTargetGroup.Unknown, icons);
+            PlayerSettings.SetIcons(
+                UnityEditor.Build.NamedBuildTarget.Android,
+                icons,
+                IconKind.Application);
             Debug.Log("[AndroidBuildSetup] App icon set.");
         }
         else
