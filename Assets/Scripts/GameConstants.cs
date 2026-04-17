@@ -28,7 +28,7 @@ public static class GameConstants
     // Projectile
     public const float BallSpeed = 4.5f * WorldScale;   // units per second
     public const int MaxBounces = 5;
-    public const int TrajectoryMaxDots = 250;
+    public const int TrajectoryMaxDots = 160;
 
     // Field
     public const float FieldRotation = 30f;  // degrees per shot

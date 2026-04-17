@@ -19,6 +19,7 @@ public class Shooter : MonoBehaviour
     private int projBounces;
     private bool aiming;
     private bool uiTouchBlocked; // Tracks if current touch started on UI
+    private bool hasValidAim;    // True when aim direction is acceptable to fire
     private Vector2 aimDir;
     private Camera mainCamera; // Cached to avoid per-frame Camera.main lookup
     private int activeTouchId = -1; // Tracks which finger we're following (-1 = none)
@@ -55,7 +56,7 @@ public class Shooter : MonoBehaviour
         {
             currentBallDisplay.transform.localPosition = Vector3.zero;
             currentBallDisplay.transform.localScale = new Vector3(curSize, curSize, 1f);
-            currentBallDisplay.sortingOrder = 5;
+            currentBallDisplay.sortingOrder = 15;
             if (mat != null) currentBallDisplay.material = new Material(mat);
 
             // v21: outer white ring (BR+5, alpha 0.25)
@@ -67,7 +68,7 @@ public class Shooter : MonoBehaviour
             var outlineSr = outlineGo.AddComponent<SpriteRenderer>();
             outlineSr.sprite = currentBallDisplay.sprite;
             outlineSr.color = new Color(1f, 1f, 1f, 0.25f);
-            outlineSr.sortingOrder = 4;
+            outlineSr.sortingOrder = 14;
             if (mat != null) outlineSr.material = new Material(mat);
 
             // v21: breathing glow ring (BR+6+pulse*2, animated in UpdateDisplay)
@@ -76,7 +77,7 @@ public class Shooter : MonoBehaviour
             glowGo.transform.localPosition = Vector3.zero;
             breathingGlow = glowGo.AddComponent<SpriteRenderer>();
             breathingGlow.sprite = currentBallDisplay.sprite;
-            breathingGlow.sortingOrder = 3;
+            breathingGlow.sortingOrder = 13;
             if (mat != null) breathingGlow.material = new Material(mat);
 
             // v21: color glow behind ball (BR+10, same color, low alpha)
@@ -87,7 +88,7 @@ public class Shooter : MonoBehaviour
             colorGlowGo.transform.localScale = new Vector3(colorGlowSize, colorGlowSize, 1f);
             colorGlow = colorGlowGo.AddComponent<SpriteRenderer>();
             colorGlow.sprite = currentBallDisplay.sprite;
-            colorGlow.sortingOrder = 2;
+            colorGlow.sortingOrder = 12;
             if (mat != null) colorGlow.material = new Material(mat);
         }
         if (nextBallDisplay)
@@ -96,7 +97,7 @@ public class Shooter : MonoBehaviour
             float nxOffset = -br * 5f;
             nextBallDisplay.transform.localPosition = new Vector3(nxOffset, 0, 0);
             nextBallDisplay.transform.localScale = new Vector3(ballDiam, ballDiam, 1f);
-            nextBallDisplay.sortingOrder = 5;
+            nextBallDisplay.sortingOrder = 15;
             if (mat != null) nextBallDisplay.material = new Material(mat);
 
             // v21: remaining count text below next ball (nxX, nxY + BR + 12)
@@ -107,7 +108,7 @@ public class Shooter : MonoBehaviour
             remainingCountTMP.fontSize = 1.2f;
             remainingCountTMP.fontStyle = TMPro.FontStyles.Bold;
             remainingCountTMP.alignment = TMPro.TextAlignmentOptions.Center;
-            remainingCountTMP.sortingOrder = 10;
+            remainingCountTMP.sortingOrder = 16;
             var remRT = remGo.GetComponent<RectTransform>();
             remRT.sizeDelta = new Vector2(0.3f, 0.1f);
         }
@@ -135,7 +136,7 @@ public class Shooter : MonoBehaviour
         comboText.fontSize = 0.8f;
         comboText.fontStyle = TMPro.FontStyles.Bold;
         comboText.alignment = TMPro.TextAlignmentOptions.Center;
-        comboText.sortingOrder = 10;
+        comboText.sortingOrder = 16;
         var textRT = textGo.GetComponent<RectTransform>();
         textRT.sizeDelta = new Vector2(0.4f, 0.1f);
 
@@ -152,7 +153,7 @@ public class Shooter : MonoBehaviour
             dotGo.transform.localScale = new Vector3(dotSize, dotSize, 1f);
             var sr = dotGo.AddComponent<SpriteRenderer>();
             sr.sprite = dotSprite;
-            sr.sortingOrder = 10;
+            sr.sortingOrder = 16;
             if (mat != null) sr.material = new Material(mat);
             comboDots[i] = sr;
         }
@@ -335,13 +336,17 @@ public class Shooter : MonoBehaviour
             if (offset.y >= minUp && offset.y > Mathf.Abs(offset.x) * 0.3f)
             {
                 aimDir = offset.normalized;
+                hasValidAim = true;
                 ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
                 ShowAimLine(shooterPos, aimDir);
+                UpdateCameraPan(aimDir);
             }
             else
             {
+                hasValidAim = false;
                 HideTrajectory();
                 HideAimLine();
+                gm.SetCameraPanTarget(0);
             }
         }
         else if (aiming)
@@ -349,11 +354,13 @@ public class Shooter : MonoBehaviour
             // Released during rotation with valid aim: snap rotation to
             // completion and fire immediately (skip remaining animation).
             // Otherwise (no valid aim): abandon.
-            bool validAim = aimLine != null && aimLine.positionCount > 0;
+            bool validAim = hasValidAim;
             Vector2 dir = aimDir;
             aiming = false;
+            hasValidAim = false;
             HideTrajectory();
             HideAimLine();
+            gm.SetCameraPanTarget(0);
             uiTouchBlocked = false;
 
             if (validAim)
@@ -456,34 +463,91 @@ public class Shooter : MonoBehaviour
             if (offset.y >= minUp && offset.y > Mathf.Abs(offset.x) * 0.3f)
             {
                 aimDir = offset.normalized;
+                hasValidAim = true;
                 ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
                 ShowAimLine(shooterPos, aimDir);
+                UpdateCameraPan(aimDir);
             }
             else
             {
+                hasValidAim = false;
                 HideTrajectory();
                 HideAimLine();
+                gm.SetCameraPanTarget(0);
             }
         }
         else
         {
+            hasValidAim = false;
             HideTrajectory();
             HideAimLine();
+            gm.SetCameraPanTarget(0);
         }
 
-        // Fire on release (only if aim line was showing, i.e. valid direction)
+        // Fire on release (only if aim was valid at release)
         if (justUp)
         {
             if (aiming)
             {
-                bool validAim = aimLine != null && aimLine.positionCount > 0;
+                bool validAim = hasValidAim;
                 aiming = false;
+                hasValidAim = false;
                 HideTrajectory();
                 HideAimLine();
-                if (validAim) Fire(aimDir);
+                if (validAim)
+                {
+                    // Keep camera panned during projectile flight so physics
+                    // match what player aimed for. Pan back when ball lands.
+                    Fire(aimDir);
+                }
+                else
+                {
+                    gm.SetCameraPanTarget(0);
+                }
             }
             uiTouchBlocked = false;
         }
+    }
+
+    /// <summary>
+    /// Pan camera horizontally to reveal balls that would otherwise be
+    /// cut off at screen edges on the aim side. Pan amount = max overflow
+    /// of any ball on the aim side (with a small buffer for smoothness).
+    /// </summary>
+    void UpdateCameraPan(Vector2 dir)
+    {
+        // Only pan when aiming toward a side (not straight up)
+        float aimX = dir.x;
+        if (Mathf.Abs(aimX) < 0.15f) { gm.SetCameraPanTarget(0); return; }
+
+        float halfW = gm.CamHW;
+        float r = GameConstants.BallRadius;
+        float maxOverflow = 0f;
+
+        foreach (var b in gm.Balls)
+        {
+            float bx = b.transform.position.x;
+            if (aimX > 0)
+            {
+                // Aiming right: check balls beyond right edge
+                float over = (bx + r) - halfW;
+                if (over > maxOverflow) maxOverflow = over;
+            }
+            else
+            {
+                // Aiming left: check balls beyond left edge
+                float over = -halfW - (bx - r);
+                if (over > maxOverflow) maxOverflow = over;
+            }
+        }
+
+        // No overflow on this side = no pan
+        if (maxOverflow <= 0f) { gm.SetCameraPanTarget(0); return; }
+
+        // Pan all the way to show the outermost ball + small extra margin
+        float extraMargin = GameConstants.BallRadius * 2f;
+        float pan = Mathf.Sign(aimX) * (maxOverflow + extraMargin);
+        gm.SetCameraPanTarget(pan);
     }
 
     // Raycast helper reused to avoid allocation
@@ -559,21 +623,29 @@ public class Shooter : MonoBehaviour
             {
                 pos += subVel;
 
-                // Wall bounces (cached camera bounds)
-                float hh = gm.CamHH;
+                // Wall bounces — only horizontal (left/right).
+                // Top is open: ball can fly past screen top and just disappears
+                // if it doesn't hit anything.
                 float hw = gm.CamHW;
+                float camX = mainCamera != null ? mainCamera.transform.position.x : 0f;
+                float leftWall = camX - hw;
+                float rightWall = camX + hw;
                 float r = GameConstants.BallRadius;
                 int prevBounces = projBounces;
-                if (pos.x - r <= -hw) { pos.x = -hw + r; projVelocity.x *= -1; subVel.x *= -1; projBounces++; }
-                if (pos.x + r >= hw) { pos.x = hw - r; projVelocity.x *= -1; subVel.x *= -1; projBounces++; }
-                if (pos.y + r >= hh) { pos.y = hh - r; projVelocity.y *= -1; subVel.y *= -1; projBounces++; }
+                if (pos.x - r <= leftWall) { pos.x = leftWall + r; projVelocity.x *= -1; subVel.x *= -1; projBounces++; }
+                if (pos.x + r >= rightWall) { pos.x = rightWall - r; projVelocity.x *= -1; subVel.x *= -1; projBounces++; }
                 if (projBounces > prevBounces && AudioManager.Instance)
                     AudioManager.Instance.PlayBounce();
 
-                if (projBounces > GameConstants.MaxBounces || pos.y < transform.position.y - 0.2f)
+                // Out of bounds: too many bounces, flew below shooter, or flew off top
+                float topFlyLimit = gm.CamHH + GameConstants.BallRadius * 6f;
+                if (projBounces > GameConstants.MaxBounces ||
+                    pos.y < transform.position.y - 0.2f ||
+                    pos.y > topFlyLimit)
                 {
                     gm.ReturnBallToPool(projectile);
                     projectile = null;
+                    gm.SetCameraPanTarget(0);
                     gm.comboCount = 0;
                     gm.StartRotation();
                     return;
@@ -586,6 +658,7 @@ public class Shooter : MonoBehaviour
                 {
                     gm.ReturnBallToPool(projectile);
                     projectile = null;
+                    gm.SetCameraPanTarget(0);
                     gm.OnProjectileAbsorbedByBH();
                     return;
                 }
@@ -610,14 +683,15 @@ public class Shooter : MonoBehaviour
                     Vector2 vel = projVelocity.normalized;
                     gm.ReturnBallToPool(projectile);
                     projectile = null;
+                    gm.SetCameraPanTarget(0);
 
                     Vector2 hitCenter = hitBall.transform.position;
                     float od = GameConstants.OverlapDistance;
                     float hd = GameConstants.HitDetectDist;
 
-                    // Look-ahead: continue flying only 1/3 ball diameter past
+                    // Look-ahead: continue flying 2/3 ball diameter past
                     // the first hit point to check for a second ball.
-                    float maxTravel = GameConstants.BallRadius * 2f / 3f;
+                    float maxTravel = GameConstants.BallRadius * 4f / 3f;
                     Ball secondHit = null;
                     float secondHitT = float.MaxValue;
 
@@ -695,6 +769,7 @@ public class Shooter : MonoBehaviour
 
                     var newBall = gm.SpawnBall(newPos, projColor);
                     if (AudioManager.Instance) AudioManager.Instance.PlayAttach();
+                    gm.SetCameraPanTarget(0);
                     ProcessMatch(newBall);
                     return;
                 }
@@ -786,8 +861,11 @@ public class Shooter : MonoBehaviour
         float stepDist = 0.0225f * GameConstants.WorldScale;
         Vector2 v = dir * stepDist;
         int bounces = 0;
-        float hh = gm.CamHH;
         float hw = gm.CamHW;
+        // Walls follow current camera X — matches physics during panned aim
+        float camX = mainCamera != null ? mainCamera.transform.position.x : 0f;
+        float leftWall = camX - hw;
+        float rightWall = camX + hw;
         float r = GameConstants.BallRadius;
         float hd = GameConstants.HitDetectDist;
         Vector2 bhPos = gm.blackHole.position;
@@ -800,14 +878,15 @@ public class Shooter : MonoBehaviour
         {
             pos += v;
 
-            // Wall bounces
-            if (pos.x - r <= -hw) { pos.x = -hw + r; v.x *= -1; bounces++; }
-            if (pos.x + r >= hw) { pos.x = hw - r; v.x *= -1; bounces++; }
-            if (pos.y + r >= hh) { pos.y = hh - r; v.y *= -1; bounces++; }
+            // Wall bounces — only horizontal; top is open
+            if (pos.x - r <= leftWall) { pos.x = leftWall + r; v.x *= -1; bounces++; }
+            if (pos.x + r >= rightWall) { pos.x = rightWall - r; v.x *= -1; bounces++; }
 
             // Stop conditions
             if (bounces > GameConstants.MaxBounces) break;
             if (pos.y < shooterY - 0.1f) break;
+            // Trajectory visual stops at mask edge (ball physics continues past it)
+            if (pos.y > gm.PlayTopY) break;
             if ((pos - bhPos).sqrMagnitude < trajBhEHSq) break;
 
             // Stop at ball hit (v21: dist < BR*1.7, squared comparison)
@@ -821,18 +900,22 @@ public class Shooter : MonoBehaviour
             trajPoints.Add(pos);
         }
 
-        // Render as dots: every other point, fading alpha (v21 line 716-719)
+        // Render as dots with increasing spacing: dense near shooter, sparse far away
         int dotIdx = 0;
         int show = Mathf.Min(trajPoints.Count, GameConstants.TrajectoryMaxDots);
-        for (int i = 0; i < show && dotIdx < MaxTrajDots; i += 2)
+        int i2 = 8; // small skip to avoid overlap with current ball visuals
+        while (i2 < show && dotIdx < MaxTrajDots)
         {
             var dot = trajDots[dotIdx];
             dot.gameObject.SetActive(true);
-            dot.transform.position = (Vector3)trajPoints[i];
-            // v21: alpha = max(0.05, (1 - i/show) * 0.35)
-            float alpha = Mathf.Max(0.05f, (1f - (float)i / show) * 0.35f);
+            dot.transform.position = (Vector3)trajPoints[i2];
+            float alpha = 0.35f; // uniform brightness along the whole trajectory
             dot.color = new Color(1f, 1f, 1f, alpha);
             dotIdx++;
+
+            // Spacing grows gradually: denser near shooter, sparser further out
+            int step = 5 + i2 / 25;
+            i2 += step;
         }
         // Hide unused dots
         for (int i = dotIdx; i < MaxTrajDots; i++)
@@ -847,10 +930,10 @@ public class Shooter : MonoBehaviour
 
     void ShowAimLine(Vector2 start, Vector2 dir)
     {
+        // Aim line disabled — trajectory dots convey aim direction clearly enough.
+        // The short white line overlapped with the shooter visuals.
         if (aimLine == null) return;
-        aimLine.positionCount = 2;
-        aimLine.SetPosition(0, (Vector3)start);
-        aimLine.SetPosition(1, (Vector3)(start + dir * 0.3f * GameConstants.WorldScale));
+        aimLine.positionCount = 0;
     }
 
     void HideAimLine()

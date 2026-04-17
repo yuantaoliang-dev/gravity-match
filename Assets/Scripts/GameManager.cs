@@ -48,6 +48,15 @@ public class GameManager : MonoBehaviour
     private float rotationTarget = 0f;
     private bool isRotating = false;
 
+    // Camera pan during aim (to reveal balls near edges)
+    private float camTargetX = 0f;
+    private const float CamPanLerpSpeed = 8f;
+    public void SetCameraPanTarget(float x) { camTargetX = x; }
+
+    // Vertical play-area bounds (balls outside these Y values are hidden)
+    public float PlayTopY { get; private set; }
+    public float PlayBottomY { get; private set; }
+
     // ===== FORWARDED PROPERTIES =====
     public float BHRadius => blackHoleController.Radius;
     public float BHEventHorizon => blackHoleController.EventHorizon;
@@ -126,7 +135,18 @@ public class GameManager : MonoBehaviour
             shooter.transform.position = new Vector3(0, safeBottom + shooterMargin, 0);
         }
 
-        Debug.Log($"[GravityMatch] SafeArea: topInset={topInset:F3}, bottomInset={bottomInset:F3}, bhY={bhY:F2}, shooterY={safeBottom + shooterMargin:F2}");
+        // Vertical play-area bounds: exclude HUD area on top and shooter area on bottom.
+        float hudHeight = 0.35f * GameConstants.WorldScale;
+        float shooterHeight = GameConstants.BallRadius * 3.5f;
+        PlayTopY = safeTop - hudHeight;
+        PlayBottomY = shooter ? shooter.transform.position.y + shooterHeight : safeBottom + shooterHeight;
+
+        // Create dark mask strips to clip balls visually at top and bottom.
+        // Balls remain logical/active, just covered visually in these zones.
+        CreateEdgeMask(true);
+        CreateEdgeMask(false);
+
+        Debug.Log($"[GravityMatch] SafeArea: topInset={topInset:F3}, bottomInset={bottomInset:F3}, bhY={bhY:F2}, shooterY={safeBottom + shooterMargin:F2}, playTop={PlayTopY:F2}, playBottom={PlayBottomY:F2}");
 
         Debug.Log($"[GravityMatch] Screen adapt: aspect={aspect:F3}, orthoSize={CamHH:F2}, width={designWidth}, bhY={bhY:F2}");
 
@@ -149,6 +169,14 @@ public class GameManager : MonoBehaviour
     {
         blackHoleController.UpdateVisuals();
 
+        // Smooth camera pan toward current target X
+        if (cam != null)
+        {
+            Vector3 cp = cam.transform.position;
+            cp.x = Mathf.Lerp(cp.x, camTargetX, Time.deltaTime * CamPanLerpSpeed);
+            cam.transform.position = cp;
+        }
+
         if (state == GameState.Play)
         {
             ForceValidColors();
@@ -158,6 +186,47 @@ public class GameManager : MonoBehaviour
         {
             UpdateRotation();
         }
+    }
+
+
+    /// <summary>
+    /// Create a full-width dark mask strip that clips balls visually in the
+    /// HUD (top) or shooter (bottom) zones. Balls entering these zones appear
+    /// sliced by the edge. Parented to camera so it pans horizontally with it.
+    /// </summary>
+    void CreateEdgeMask(bool isTop)
+    {
+        var go = new GameObject(isTop ? "TopEdgeMask" : "BottomEdgeMask");
+        // Parent to camera so it pans horizontally along with camera
+        go.transform.SetParent(cam.transform, false);
+
+        // Runtime 1x1 white sprite, pixelsPerUnit=1 so sprite is 1x1 world unit.
+        // Scale below then controls final world-space size directly.
+        var tex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+        tex.SetPixel(0, 0, Color.white);
+        tex.Apply();
+        var maskSprite = Sprite.Create(tex, new Rect(0, 0, 1, 1), new Vector2(0.5f, 0.5f), 1f);
+
+        var sr = go.AddComponent<SpriteRenderer>();
+        sr.sprite = maskSprite;
+        sr.color = new Color(0.04f, 0.05f, 0.08f, 1f); // background color
+        sr.sortingOrder = 8; // above balls (2) and breathing glow (3), below shooter visuals (12+)
+        var mat = GameConstants.CreateUnlitSpriteMaterial();
+        if (mat != null) sr.material = mat;
+
+        // Width: wider than camera (cover beyond pan range)
+        float width = CamHW * 3f;
+        // Height: from screen edge to play bound
+        float worldTop = CamHH;
+        float worldBottom = -CamHH;
+        float top = isTop ? worldTop : PlayBottomY;
+        float bottom = isTop ? PlayTopY : worldBottom;
+        float height = top - bottom;
+        float centerY = (top + bottom) * 0.5f;
+
+        // Use localPosition since parented to camera (camera is at world origin center)
+        go.transform.localPosition = new Vector3(0, centerY, 1f); // +1 Z so in front of balls
+        go.transform.localScale = new Vector3(width, height, 1f);
     }
 
     /// <summary>Reset game state for a new level. Called by LevelManager.</summary>
