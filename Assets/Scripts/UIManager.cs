@@ -296,7 +296,7 @@ public class UIManager : MonoBehaviour
         string starStr = new string('*', stars) + new string('-', 3 - stars);
         starsText.text = starStr;
         resultTitle.text = "All clear!";
-        resultDetail.text = $"Score: {score}\nBonus: {ballsLeft} x 200";
+        resultDetail.text = $"Score: {score}\nBonus: {ballsLeft} x {GameConstants.ScoreLeftover}";
         nextButton.gameObject.SetActive(hasNextLevel);
     }
 

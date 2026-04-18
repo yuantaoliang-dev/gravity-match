@@ -44,8 +44,8 @@ public static class LevelDataBuilder
             tip = "Blue=3match, Red=4match(aim at singleton), Green=5match(aim into gap)",
             budget = 30,
             colors = new[] { R, B, G },
-            starScore3 = 1000,
-            starScore2 = 500,
+            starScore3 = 2400,
+            starScore2 = 2000,
         };
         var bl = lv.blobs;
 
@@ -87,8 +87,8 @@ public static class LevelDataBuilder
             tip = "2 colors, 1 four-match bonus. Learn to shoot!",
             budget = 14,
             colors = new[] { R, B },
-            starScore3 = 2500,
-            starScore2 = 1500,
+            starScore3 = 1500,
+            starScore2 = 1300,
         };
         var bl = lv.blobs;
         // 4 pairs
@@ -112,8 +112,8 @@ public static class LevelDataBuilder
             tip = "3 colors, 4 lonely balls. Combo is your lifeline!",
             budget = 16,
             colors = new[] { R, B, G },
-            starScore3 = 2400,
-            starScore2 = 1800,
+            starScore3 = 1550,
+            starScore2 = 1300,
         };
         var bl = lv.blobs;
         // 5 pairs
@@ -139,8 +139,8 @@ public static class LevelDataBuilder
             tip = "6 singles + 1 four-match. Budget razor-thin!",
             budget = 18,
             colors = new[] { R, B, G },
-            starScore3 = 3000,
-            starScore2 = 2200,
+            starScore3 = 1900,
+            starScore2 = 1600,
         };
         var bl = lv.blobs;
         // 1 four-match
@@ -169,8 +169,8 @@ public static class LevelDataBuilder
             tip = "4 colors, NO cones, 8 singles. Pure skill + combos!",
             budget = 22,
             colors = new[] { R, B, G, A },
-            starScore3 = 3500,
-            starScore2 = 2500,
+            starScore3 = 2050,
+            starScore2 = 1700,
         };
         var bl = lv.blobs;
         // 5 pairs
@@ -200,8 +200,8 @@ public static class LevelDataBuilder
             tip = "26 balls, 10 singles, 4 colors. Bridge the 5-match or perish!",
             budget = 28,
             colors = new[] { R, B, G, A },
-            starScore3 = 5000,
-            starScore2 = 3500,
+            starScore3 = 2650,
+            starScore2 = 2200,
         };
         var bl = lv.blobs;
         // 1 five-match

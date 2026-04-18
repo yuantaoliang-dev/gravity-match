@@ -35,13 +35,16 @@ public static class GameConstants
     public const float ConeAngle4 = 30f;     // degrees, ±30
     public const float ConeAngle5 = 30f;     // degrees, ±30
 
-    // Scoring
-    public const int Score3Match = 100;   // per ball
-    public const int Score4Match = 150;   // per ball
-    public const int Score5Match = 200;   // per ball
-    public const int ScoreComboBonus = 300;
-    public const int ScoreBHAbsorb = 50;  // per ball
-    public const int ScoreLeftover = 200; // per remaining ball
+    // Scoring — tuned for a challenging star curve where 3★ requires ~95%
+    // of theoretical max (perfect match chains + cone sweeps + combos).
+    // All values roughly halved from v21 so raw numbers stay in the 1000-3000
+    // range typical for casual bubble-shooter feel.
+    public const int Score3Match = 50;   // per ball
+    public const int Score4Match = 70;   // per ball
+    public const int Score5Match = 100;  // per ball
+    public const int ScoreComboBonus = 50;
+    public const int ScoreBHAbsorb = 20; // per ball
+    public const int ScoreLeftover = 50; // per remaining ball
 
     // Timing (seconds)
     public const float HighlightDuration = 0.37f;   // 22 frames @ 60fps
