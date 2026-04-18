@@ -25,6 +25,16 @@ public class Shooter : MonoBehaviour
     private int activeTouchId = -1; // Tracks which finger we're following (-1 = none)
     private bool activeMouse; // True while currently tracked left-click is held
 
+    // Short-tap vs long-press gating.
+    // Tap: release before threshold → fire immediately, no trajectory, no camera pan
+    //      (projectile walls stay at original ±CamHW position).
+    // Hold: after threshold → show trajectory + enable camera pan for wide aims.
+    [Header("Aim Hold Threshold")]
+    [Tooltip("Seconds the player must hold before trajectory/pan become visible. Shorter presses fire immediately as a quick tap. Typical casual taps are 150-250ms; raise this if short taps still show trajectory.")]
+    [SerializeField] private float aimHoldThreshold = 0.25f;
+    private float aimStartTime;
+    private bool aimVisible; // true once aimHoldThreshold elapsed with valid aim
+
     // Trajectory dot pool (v21 style: small circles with fading alpha)
     private const int MaxTrajDots = 100;
     private List<SpriteRenderer> trajDots = new List<SpriteRenderer>();
@@ -327,6 +337,8 @@ public class Shooter : MonoBehaviour
                 if (IsPointerOverUI()) { uiTouchBlocked = true; return; }
                 aiming = true;
                 uiTouchBlocked = false;
+                aimStartTime = Time.time;
+                aimVisible = false;
             }
 
             Vector2 inputWorld = mainCamera.ScreenToWorldPoint(inputScreenPos);
@@ -337,9 +349,16 @@ public class Shooter : MonoBehaviour
             {
                 aimDir = offset.normalized;
                 hasValidAim = true;
-                ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
-                ShowAimLine(shooterPos, aimDir);
-                UpdateCameraPan(aimDir);
+
+                if (!aimVisible && Time.time - aimStartTime >= aimHoldThreshold)
+                    aimVisible = true;
+
+                if (aimVisible)
+                {
+                    ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
+                    ShowAimLine(shooterPos, aimDir);
+                    UpdateCameraPan(aimDir);
+                }
             }
             else
             {
@@ -354,10 +373,13 @@ public class Shooter : MonoBehaviour
             // Released during rotation with valid aim: snap rotation to
             // completion and fire immediately (skip remaining animation).
             // Otherwise (no valid aim): abandon.
+            // Short tap during rotation: aimVisible was never true → no pan was
+            // applied, walls stay at ±CamHW for the fired ball.
             bool validAim = hasValidAim;
             Vector2 dir = aimDir;
             aiming = false;
             hasValidAim = false;
+            aimVisible = false;
             HideTrajectory();
             HideAimLine();
             gm.SetCameraPanTarget(0);
@@ -445,7 +467,11 @@ public class Shooter : MonoBehaviour
             uiTouchBlocked = IsPointerOverUI();
             Debug.Log($"[Shooter] Touch down: uiBlocked={uiTouchBlocked}, phase={(Input.touchCount > 0 ? Input.GetTouch(0).phase.ToString() : "mouse")}");
             if (!uiTouchBlocked)
+            {
                 aiming = true;
+                aimStartTime = Time.time;
+                aimVisible = false; // hidden until player holds past threshold
+            }
         }
 
         // Update aim direction while dragging
@@ -464,9 +490,18 @@ public class Shooter : MonoBehaviour
             {
                 aimDir = offset.normalized;
                 hasValidAim = true;
-                ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
-                ShowAimLine(shooterPos, aimDir);
-                UpdateCameraPan(aimDir);
+
+                // Reveal trajectory / enable camera pan only after the hold threshold.
+                // Short tap releases before this fires, keeping walls at original ±CamHW.
+                if (!aimVisible && Time.time - aimStartTime >= aimHoldThreshold)
+                    aimVisible = true;
+
+                if (aimVisible)
+                {
+                    ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
+                    ShowAimLine(shooterPos, aimDir);
+                    UpdateCameraPan(aimDir);
+                }
             }
             else
             {
@@ -492,12 +527,14 @@ public class Shooter : MonoBehaviour
                 bool validAim = hasValidAim;
                 aiming = false;
                 hasValidAim = false;
+                aimVisible = false;
                 HideTrajectory();
                 HideAimLine();
                 if (validAim)
                 {
                     // Keep camera panned during projectile flight so physics
                     // match what player aimed for. Pan back when ball lands.
+                    // Short tap: pan was never set, so walls stay at original ±CamHW.
                     Fire(aimDir);
                 }
                 else
