@@ -50,8 +50,7 @@ public class BlackHoleController : MonoBehaviour
 
         bhSr.color = new Color(0.06f, 0.06f, 0.10f, 1f);
         bhSr.sortingOrder = -10;
-        var mat = GameConstants.CreateUnlitSpriteMaterial();
-        if (mat != null) bhSr.material = mat;
+        bhSr.sharedMaterial = GameConstants.GetUnlitSpriteMaterial();
 
         // Purple ring: child circle scaled slightly larger behind the dark center
         var ringGo = new GameObject("BHRing");
@@ -61,7 +60,7 @@ public class BlackHoleController : MonoBehaviour
         bhRingSr.sprite = bhSr.sprite;
         bhRingSr.color = new Color(0.55f, 0.15f, 0.85f, 0.5f);
         bhRingSr.sortingOrder = -11;
-        if (mat != null) bhRingSr.material = new Material(mat);
+        bhRingSr.sharedMaterial = GameConstants.GetUnlitSpriteMaterial();
     }
 
     /// <summary>Called every frame from GameManager.Update.</summary>

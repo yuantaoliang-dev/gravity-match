@@ -64,13 +64,27 @@ public static class GameConstants
         return "#" + ColorUtility.ToHtmlStringRGB(c);
     }
 
-    /// <summary>Create an unlit sprite material (URP first, legacy fallback).</summary>
-    public static Material CreateUnlitSpriteMaterial()
+    /// <summary>
+    /// Return the single shared unlit sprite Material used by every SpriteRenderer
+    /// in the project. Assign via <c>sr.sharedMaterial = ...</c> (NOT
+    /// <c>sr.material</c>, which silently clones) so Unity's 2D batcher groups
+    /// all sprites into one draw call.
+    /// </summary>
+    private static Material _unlitSpriteMat;
+    public static Material GetUnlitSpriteMaterial()
     {
+        if (_unlitSpriteMat != null) return _unlitSpriteMat;
         var shader = Shader.Find("Universal Render Pipeline/2D/Sprite-Unlit-Default");
         if (shader == null) shader = Shader.Find("Sprites/Default");
-        return shader != null ? new Material(shader) : null;
+        _unlitSpriteMat = shader != null
+            ? new Material(shader) { name = "UnlitSpriteShared" }
+            : null;
+        return _unlitSpriteMat;
     }
+
+    /// <summary>Deprecated alias. Use <see cref="GetUnlitSpriteMaterial"/> with sharedMaterial for batching.</summary>
+    [System.Obsolete("Use GetUnlitSpriteMaterial() and assign via sr.sharedMaterial so the batcher can merge draw calls")]
+    public static Material CreateUnlitSpriteMaterial() => GetUnlitSpriteMaterial();
 }
 
 /// <summary>

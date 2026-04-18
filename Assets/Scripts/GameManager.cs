@@ -222,8 +222,7 @@ public class GameManager : MonoBehaviour
         sr.sprite = maskSprite;
         sr.color = new Color(0.04f, 0.05f, 0.08f, 1f); // background color
         sr.sortingOrder = 8; // above balls (2) and breathing glow (3), below shooter visuals (12+)
-        var mat = GameConstants.CreateUnlitSpriteMaterial();
-        if (mat != null) sr.material = mat;
+        sr.sharedMaterial = GameConstants.GetUnlitSpriteMaterial();
 
         // Width: wider than camera (cover beyond pan range)
         float width = CamHW * 3f;

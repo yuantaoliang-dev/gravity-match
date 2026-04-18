@@ -84,8 +84,7 @@ public class FXPool : MonoBehaviour
         go.transform.SetParent(poolRoot, false);
         var sr = go.AddComponent<SpriteRenderer>();
         sr.sortingOrder = type == FXType.SuckGhost ? 5 : 15;
-        var mat = GameConstants.CreateUnlitSpriteMaterial();
-        if (mat != null) sr.material = mat;
+        sr.sharedMaterial = GameConstants.GetUnlitSpriteMaterial();
         return go;
     }
 }

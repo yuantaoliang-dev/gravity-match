@@ -52,7 +52,10 @@ public class Shooter : MonoBehaviour
 
     void Start()
     {
-        var mat = GameConstants.CreateUnlitSpriteMaterial();
+        // All SpriteRenderers share one Material instance (sharedMaterial) so the
+        // 2D batcher can merge them into a single draw call. Previously this
+        // class allocated ~110 unique Material instances (dots + ring + glows).
+        var sharedMat = GameConstants.GetUnlitSpriteMaterial();
 
         // Hide shooter platform sprite (v21 has no platform indicator)
         var sr = GetComponent<SpriteRenderer>();
@@ -67,7 +70,7 @@ public class Shooter : MonoBehaviour
             currentBallDisplay.transform.localPosition = Vector3.zero;
             currentBallDisplay.transform.localScale = new Vector3(curSize, curSize, 1f);
             currentBallDisplay.sortingOrder = 15;
-            if (mat != null) currentBallDisplay.material = new Material(mat);
+            currentBallDisplay.sharedMaterial = sharedMat;
 
             // v21: outer white ring (BR+5, alpha 0.25)
             var outlineGo = new GameObject("CurrentOutline");
@@ -79,7 +82,7 @@ public class Shooter : MonoBehaviour
             outlineSr.sprite = currentBallDisplay.sprite;
             outlineSr.color = new Color(1f, 1f, 1f, 0.25f);
             outlineSr.sortingOrder = 14;
-            if (mat != null) outlineSr.material = new Material(mat);
+            outlineSr.sharedMaterial = sharedMat;
 
             // v21: breathing glow ring (BR+6+pulse*2, animated in UpdateDisplay)
             var glowGo = new GameObject("BreathingGlow");
@@ -88,7 +91,7 @@ public class Shooter : MonoBehaviour
             breathingGlow = glowGo.AddComponent<SpriteRenderer>();
             breathingGlow.sprite = currentBallDisplay.sprite;
             breathingGlow.sortingOrder = 13;
-            if (mat != null) breathingGlow.material = new Material(mat);
+            breathingGlow.sharedMaterial = sharedMat;
 
             // v21: color glow behind ball (BR+10, same color, low alpha)
             var colorGlowGo = new GameObject("ColorGlow");
@@ -99,7 +102,7 @@ public class Shooter : MonoBehaviour
             colorGlow = colorGlowGo.AddComponent<SpriteRenderer>();
             colorGlow.sprite = currentBallDisplay.sprite;
             colorGlow.sortingOrder = 12;
-            if (mat != null) colorGlow.material = new Material(mat);
+            colorGlow.sharedMaterial = sharedMat;
         }
         if (nextBallDisplay)
         {
@@ -108,7 +111,7 @@ public class Shooter : MonoBehaviour
             nextBallDisplay.transform.localPosition = new Vector3(nxOffset, 0, 0);
             nextBallDisplay.transform.localScale = new Vector3(ballDiam, ballDiam, 1f);
             nextBallDisplay.sortingOrder = 15;
-            if (mat != null) nextBallDisplay.material = new Material(mat);
+            nextBallDisplay.sharedMaterial = sharedMat;
 
             // v21: remaining count text below next ball (nxX, nxY + BR + 12)
             var remGo = new GameObject("RemainingCount");
@@ -123,13 +126,13 @@ public class Shooter : MonoBehaviour
             remRT.sizeDelta = new Vector2(0.3f, 0.1f);
         }
 
-        // Create trajectory LineRenderer programmatically
-        CreateTrajectoryDots(mat);
-        CreateAimLine(mat);
-        CreateComboDisplay(mat);
+        // Create trajectory LineRenderer programmatically — all three use sharedMat
+        CreateTrajectoryDots();
+        CreateAimLine();
+        CreateComboDisplay();
     }
 
-    void CreateComboDisplay(Material mat)
+    void CreateComboDisplay()
     {
         // v21: combo counter at SX + BR*7, SY (right of shooter)
         float br = GameConstants.BallRadius;
@@ -150,10 +153,11 @@ public class Shooter : MonoBehaviour
         var textRT = textGo.GetComponent<RectTransform>();
         textRT.sizeDelta = new Vector2(0.4f, 0.1f);
 
-        // 3 progress dots
+        // 3 progress dots — share one Material
         Sprite dotSprite = currentBallDisplay ? currentBallDisplay.sprite : null;
         float dotSize = 0.04f * GameConstants.WorldScale;
         float dotSpacing = 0.06f * GameConstants.WorldScale;
+        var sharedMat = GameConstants.GetUnlitSpriteMaterial();
         for (int i = 0; i < 3; i++)
         {
             var dotGo = new GameObject($"ComboDot{i}");
@@ -164,7 +168,7 @@ public class Shooter : MonoBehaviour
             var sr = dotGo.AddComponent<SpriteRenderer>();
             sr.sprite = dotSprite;
             sr.sortingOrder = 16;
-            if (mat != null) sr.material = new Material(mat);
+            sr.sharedMaterial = sharedMat;
             comboDots[i] = sr;
         }
 
@@ -194,22 +198,30 @@ public class Shooter : MonoBehaviour
         }
     }
 
-    static Material CreateLineMaterial()
+    // LineRenderer needs renderQueue=3000 (Transparent), which we don't want
+    // leaking onto the shared sprite Material (it would push ALL sprites into
+    // the transparent queue). Keep a separate cached instance just for lines.
+    static Material _lineMat;
+    static Material GetLineMaterial()
     {
-        // Use project-standard unlit sprite shader for LineRenderer
-        var mat = GameConstants.CreateUnlitSpriteMaterial();
-        if (mat != null) mat.renderQueue = 3000; // Transparent queue
-        return mat;
+        if (_lineMat != null) return _lineMat;
+        var shader = Shader.Find("Universal Render Pipeline/2D/Sprite-Unlit-Default");
+        if (shader == null) shader = Shader.Find("Sprites/Default");
+        if (shader == null) return null;
+        _lineMat = new Material(shader) { name = "LineShared", renderQueue = 3000 };
+        return _lineMat;
     }
 
-    void CreateTrajectoryDots(Material baseMat)
+    void CreateTrajectoryDots()
     {
-        // v21 style: pool of small dot sprites, positioned along trajectory
+        // v21 style: pool of small dot sprites, positioned along trajectory.
+        // Biggest batching win in the project — 100 dots now share ONE Material.
         Sprite dotSprite = currentBallDisplay ? currentBallDisplay.sprite : null;
         float dotSize = 0.025f * GameConstants.WorldScale; // v21: radius 1.2px
         var parent = new GameObject("TrajectoryDots");
         parent.transform.SetParent(transform, false);
 
+        var sharedMat = GameConstants.GetUnlitSpriteMaterial();
         for (int i = 0; i < MaxTrajDots; i++)
         {
             var go = new GameObject($"Dot{i}");
@@ -218,13 +230,13 @@ public class Shooter : MonoBehaviour
             var sr = go.AddComponent<SpriteRenderer>();
             sr.sprite = dotSprite;
             sr.sortingOrder = 10;
-            if (baseMat != null) sr.material = new Material(baseMat);
+            sr.sharedMaterial = sharedMat;
             go.SetActive(false);
             trajDots.Add(sr);
         }
     }
 
-    void CreateAimLine(Material baseMat)
+    void CreateAimLine()
     {
         var go = new GameObject("AimLine");
         go.transform.SetParent(transform, false);
@@ -236,7 +248,7 @@ public class Shooter : MonoBehaviour
         aimLine.endColor = new Color(1f, 1f, 1f, 0.3f);
         aimLine.sortingOrder = 10;
         aimLine.positionCount = 0;
-        aimLine.material = CreateLineMaterial();
+        aimLine.sharedMaterial = GetLineMaterial();
     }
 
     void Update()

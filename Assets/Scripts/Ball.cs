@@ -34,9 +34,10 @@ public class Ball : MonoBehaviour
         float diam = GameConstants.BallRadius * 2f;
         transform.localScale = new Vector3(diam, diam, 1f);
 
-        // Use unlit shader so balls are visible without 2D lighting
-        var mat = GameConstants.CreateUnlitSpriteMaterial();
-        if (mat != null) sr.material = mat;
+        // Use unlit shader so balls are visible without 2D lighting.
+        // sharedMaterial (not material) so every ball references the same
+        // Material instance — required for 2D SpriteRenderer batching.
+        sr.sharedMaterial = GameConstants.GetUnlitSpriteMaterial();
 
         // Sync cached position (transform.position was set by the spawn code BEFORE Init)
         cachedPos = transform.position;

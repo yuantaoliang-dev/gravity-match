@@ -328,8 +328,7 @@ public class MatchSystem : MonoBehaviour
         var mf = go.AddComponent<MeshFilter>();
         mf.mesh = mesh;
         var mr = go.AddComponent<MeshRenderer>();
-        var mat = GameConstants.CreateUnlitSpriteMaterial();
-        if (mat != null) mr.material = mat;
+        mr.sharedMaterial = GameConstants.GetUnlitSpriteMaterial();
         mr.sortingOrder = 1;
 
         return go;
