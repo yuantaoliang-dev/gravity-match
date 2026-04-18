@@ -16,6 +16,12 @@ public class BlackHoleController : MonoBehaviour
     public float Radius => GameConstants.BHRadiusBase + bhAte * GameConstants.BHGrowthRadius;
     public float EventHorizon => GameConstants.BHEventHorizonBase + bhAte * GameConstants.BHGrowthEH;
 
+    // ===== ZERO-ALLOC BUFFERS =====
+    // AutoAbsorb runs every frame during Play state — buffers reused across frames.
+    private readonly HashSet<int> _absIds       = new HashSet<int>();
+    private readonly List<Ball>   _absorbed     = new List<Ball>(32);
+    private readonly List<Ball>   _touchScratch = new List<Ball>(64);
+
     public void Init(GameManager gm, Transform blackHoleTransform)
     {
         this.gm = gm;
@@ -86,35 +92,37 @@ public class BlackHoleController : MonoBehaviour
         Vector2 center = bhTransform.position;
         float absThresh = EventHorizon + GameConstants.BallRadius * 0.5f;
         float absThreshSq = absThresh * absThresh;
-        var absIds = new HashSet<int>();
+        _absIds.Clear();
         foreach (var b in gm.Balls)
         {
             if (b.SqrDistTo(center) < absThreshSq)
-                absIds.Add(b.id);
+                _absIds.Add(b.id);
         }
-        if (absIds.Count == 0) return;
+        if (_absIds.Count == 0) return;
 
-        // Expand to touching neighbors
+        // Expand to touching neighbors (zero-alloc)
         float pullRange = EventHorizon + GameConstants.BallRadius * 2.5f;
         float pullRangeSq = pullRange * pullRange;
         foreach (var b in gm.Balls)
         {
-            if (absIds.Contains(b.id)) continue;
+            if (_absIds.Contains(b.id)) continue;
             if (b.SqrDistTo(center) > pullRangeSq) continue;
-            foreach (var nb in gm.GetTouching(b))
+            gm.GetTouchingNonAlloc(b, -1, _touchScratch);
+            for (int i = 0; i < _touchScratch.Count; i++)
             {
-                if (absIds.Contains(nb.id)) { absIds.Add(b.id); break; }
+                if (_absIds.Contains(_touchScratch[i].id)) { _absIds.Add(b.id); break; }
             }
         }
 
-        // Manual loop instead of LINQ .Where().ToList()
-        var absorbed = new List<Ball>();
+        // Collect balls to absorb (reused buffer)
+        _absorbed.Clear();
         foreach (var b in gm.Balls)
         {
-            if (absIds.Contains(b.id)) absorbed.Add(b);
+            if (_absIds.Contains(b.id)) _absorbed.Add(b);
         }
-        gm.RemoveBalls(absorbed);
-        gm.score += absorbed.Count * GameConstants.ScoreBHAbsorb;
+        int absorbCount = _absorbed.Count;
+        gm.RemoveBalls(_absorbed);
+        gm.score += absorbCount * GameConstants.ScoreBHAbsorb;
         gm.ForceValidColors();
         gm.ui.UpdateHUD(gm.ballsLeft, gm.score, gm.Balls.Count);
         gm.CheckEnd();

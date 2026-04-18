@@ -1,7 +1,6 @@
 using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 
 /// <summary>
 /// Central game orchestrator. Delegates to subsystems:
@@ -47,6 +46,18 @@ public class GameManager : MonoBehaviour
     private float fieldAngle = 0f;
     private float rotationTarget = 0f;
     private bool isRotating = false;
+
+    // ===== ZERO-ALLOC BUFFERS =====
+    // ForceValidColors runs every frame during Play — eliminating its allocations is the
+    // single biggest GC win in the project. Each buffer has a dedicated owner so there's
+    // no reentry corruption between PickNextColor, ForceValidColors, FillPairColorsNonAlloc.
+    private readonly HashSet<int>   _pairVisited       = new HashSet<int>();
+    private readonly List<Ball>     _pairGroupScratch  = new List<Ball>(64);
+    private readonly HashSet<Color> _colorSet          = new HashSet<Color>();
+    private readonly List<Color>    _pickPcBuf         = new List<Color>(4);
+    private readonly List<Color>    _forcePcBuf        = new List<Color>(4);
+    private readonly List<(Color c, float w)> _weights = new List<(Color, float)>(4);
+    private readonly List<Ball>     _pickTouchScratch  = new List<Ball>(64);
 
     // Camera pan during aim (to reveal balls near edges)
     private float camTargetX = 0f;
@@ -345,70 +356,100 @@ public class GameManager : MonoBehaviour
     // ===== SUBSYSTEM FORWARDS (Shooter.cs facade) =====
     public List<Ball> GetTouching(Ball b, float maxDist = -1) => matchSystem.GetTouching(b, maxDist);
     public List<Ball> FindGroup(Ball start, float maxDist = -1) => matchSystem.FindGroup(start, maxDist);
+    public void GetTouchingNonAlloc(Ball b, float maxDist, List<Ball> results)
+        => matchSystem.GetTouchingNonAlloc(b, maxDist, results);
+    public void FindGroupNonAlloc(Ball start, float maxDist, List<Ball> results)
+        => matchSystem.FindGroupNonAlloc(start, maxDist, results);
 
     // ===== COLOR SELECTION =====
-    public List<Color> GetPairColors()
+
+    /// <summary>
+    /// Zero-alloc: fills <paramref name="into"/> with one color per connected group of size >= 2.
+    /// Uses class-level buffers; not reentrancy-safe. Synchronous only.
+    /// </summary>
+    void FillPairColorsNonAlloc(List<Color> into)
     {
-        var visited = new HashSet<int>();
-        var paired = new HashSet<Color>();
+        into.Clear();
+        _pairVisited.Clear();
         foreach (var b in balls)
         {
-            if (visited.Contains(b.id)) continue;
-            var grp = FindGroup(b, GameConstants.MatchTouchDist);
-            foreach (var g in grp) visited.Add(g.id);
-            if (grp.Count >= 2) paired.Add(b.ballColor);
+            if (_pairVisited.Contains(b.id)) continue;
+            matchSystem.FindGroupNonAlloc(b, GameConstants.MatchTouchDist, _pairGroupScratch);
+            for (int i = 0; i < _pairGroupScratch.Count; i++) _pairVisited.Add(_pairGroupScratch[i].id);
+            if (_pairGroupScratch.Count >= 2 && !into.Contains(b.ballColor))
+                into.Add(b.ballColor);
         }
-        return new List<Color>(paired);
+    }
+
+    /// <summary>Allocating convenience wrapper. Prefer FillPairColorsNonAlloc on hot paths.</summary>
+    public List<Color> GetPairColors()
+    {
+        var list = new List<Color>(4);
+        FillPairColorsNonAlloc(list);
+        return list;
     }
 
     public Color PickNextColor()
     {
         if (balls.Count == 0) return levelManager.GetCurrentLevelDef().colors[0];
-        var pc = GetPairColors();
-        if (pc.Count == 0)
+        FillPairColorsNonAlloc(_pickPcBuf);
+        if (_pickPcBuf.Count == 0)
         {
-            var colorSet = new HashSet<Color>();
-            foreach (var b in balls) colorSet.Add(b.ballColor);
-            pc = new List<Color>(colorSet);
+            // Fallback: all unique colors currently on field
+            _colorSet.Clear();
+            foreach (var b in balls) _colorSet.Add(b.ballColor);
+            _pickPcBuf.Clear();
+            foreach (var c in _colorSet) _pickPcBuf.Add(c);
         }
-        if (pc.Count == 0) return levelManager.GetCurrentLevelDef().colors[0];
-        if (pc.Count == 1) return pc[0];
+        if (_pickPcBuf.Count == 0) return levelManager.GetCurrentLevelDef().colors[0];
+        if (_pickPcBuf.Count == 1) return _pickPcBuf[0];
 
-        // Weighted random
-        var weights = new List<(Color c, float w)>();
-        foreach (var c in pc)
+        // Weighted random — prefer colors that already have a matched neighbour on field
+        _weights.Clear();
+        for (int ci = 0; ci < _pickPcBuf.Count; ci++)
         {
+            Color c = _pickPcBuf[ci];
             float w = 0;
             foreach (var b in balls)
             {
                 if (b.ballColor != c) continue;
-                bool hasPair = GetTouching(b, GameConstants.MatchTouchDist)
-                    .Any(t => t.ballColor == c);
+                // Replaces `GetTouching(b).Any(t => t.ballColor == c)`
+                matchSystem.GetTouchingNonAlloc(b, GameConstants.MatchTouchDist, _pickTouchScratch);
+                bool hasPair = false;
+                for (int i = 0; i < _pickTouchScratch.Count; i++)
+                {
+                    if (_pickTouchScratch[i].ballColor == c) { hasPair = true; break; }
+                }
                 w += hasPair ? 4f : 1f;
             }
-            weights.Add((c, Mathf.Max(w, 1f)));
+            _weights.Add((c, Mathf.Max(w, 1f)));
         }
         float total = 0f;
-        foreach (var x in weights) total += x.w;
+        for (int i = 0; i < _weights.Count; i++) total += _weights[i].w;
         float r = Random.Range(0f, total);
         float acc = 0;
-        foreach (var (c, w) in weights) { acc += w; if (r <= acc) return c; }
-        return pc[0];
+        for (int i = 0; i < _weights.Count; i++)
+        {
+            acc += _weights[i].w;
+            if (r <= acc) return _weights[i].c;
+        }
+        return _pickPcBuf[0];
     }
 
     public void ForceValidColors()
     {
         if (balls.Count == 0) return;
-        var pc = GetPairColors();
-        if (pc.Count == 0)
+        FillPairColorsNonAlloc(_forcePcBuf);
+        if (_forcePcBuf.Count == 0)
         {
-            var colorSet = new HashSet<Color>();
-            foreach (var b in balls) colorSet.Add(b.ballColor);
-            pc = new List<Color>(colorSet);
+            _colorSet.Clear();
+            foreach (var b in balls) _colorSet.Add(b.ballColor);
+            _forcePcBuf.Clear();
+            foreach (var c in _colorSet) _forcePcBuf.Add(c);
         }
-        if (pc.Count == 0) return;
-        if (!pc.Contains(currentColor)) currentColor = pc[Random.Range(0, pc.Count)];
-        if (!pc.Contains(nextColor)) nextColor = pc[Random.Range(0, pc.Count)];
+        if (_forcePcBuf.Count == 0) return;
+        if (!_forcePcBuf.Contains(currentColor)) currentColor = _forcePcBuf[Random.Range(0, _forcePcBuf.Count)];
+        if (!_forcePcBuf.Contains(nextColor)) nextColor = _forcePcBuf[Random.Range(0, _forcePcBuf.Count)];
     }
 
     // ===== SHOOTING =====

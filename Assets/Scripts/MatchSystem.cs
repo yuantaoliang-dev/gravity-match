@@ -1,7 +1,6 @@
 using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 
 /// <summary>
 /// Handles match detection (BFS group finding), match sequence animation
@@ -13,6 +12,19 @@ public class MatchSystem : MonoBehaviour
     private GameManager gm;
     private FXPool fxPool;
 
+    // ===== ZERO-ALLOC BUFFERS =====
+    // DO NOT expose. Each buffer has a documented single-owner call path to
+    // prevent reentry corruption. They are class-scoped so allocations happen
+    // exactly once per MatchSystem lifetime, eliminating per-match GC spikes.
+    private readonly List<Ball>       _findGroupScratch = new List<Ball>(64);      // inner GetTouching buffer used by FindGroupNonAlloc
+    private readonly HashSet<int>     _findGroupVisited = new HashSet<int>();
+    private readonly Queue<Ball>      _findGroupQueue   = new Queue<Ball>(128);
+    private readonly HashSet<int>     _matchIds         = new HashSet<int>();      // matched ball ids during match sequence
+    private readonly List<GameObject> _highlightRings   = new List<GameObject>(64);
+    private readonly List<Ball>       _comboSingles     = new List<Ball>(64);
+    private readonly List<Ball>       _comboScratch     = new List<Ball>(64);      // GetTouching buffer used in combo / ForceValidColors check
+    private readonly List<GameObject> _buddyRings       = new List<GameObject>(4);
+
     public void Init(GameManager gm, FXPool fxPool)
     {
         this.gm = gm;
@@ -21,42 +33,74 @@ public class MatchSystem : MonoBehaviour
 
     // ===== MATCH DETECTION =====
 
-    /// <summary>Return all balls within maxDist of the given ball.</summary>
-    public List<Ball> GetTouching(Ball b, float maxDist = -1)
+    /// <summary>
+    /// Zero-alloc variant: fills <paramref name="results"/> (clears first) with all balls
+    /// within maxDist of <paramref name="b"/>. Caller supplies a reusable buffer.
+    /// </summary>
+    public void GetTouchingNonAlloc(Ball b, float maxDist, List<Ball> results)
     {
+        results.Clear();
         if (maxDist < 0) maxDist = GameConstants.TouchDist;
         float maxDistSq = maxDist * maxDist;
-        var result = new List<Ball>();
         foreach (var o in gm.Balls)
         {
             if (o.id != b.id && b.SqrDistTo(o) <= maxDistSq)
-                result.Add(o);
+                results.Add(o);
         }
+    }
+
+    /// <summary>
+    /// Allocating convenience wrapper. Prefer <see cref="GetTouchingNonAlloc"/> on hot paths.
+    /// </summary>
+    public List<Ball> GetTouching(Ball b, float maxDist = -1)
+    {
+        var result = new List<Ball>();
+        GetTouchingNonAlloc(b, maxDist, result);
         return result;
     }
 
-    /// <summary>BFS flood-fill to find all connected same-color balls.</summary>
-    public List<Ball> FindGroup(Ball start, float maxDist = -1)
+    /// <summary>
+    /// Zero-alloc BFS flood-fill: fills <paramref name="results"/> with all connected
+    /// same-color balls reachable from <paramref name="start"/>. Uses class-level BFS
+    /// state buffers — not safe to call re-entrantly (all current callers are sync).
+    /// </summary>
+    public void FindGroupNonAlloc(Ball start, float maxDist, List<Ball> results)
     {
+        results.Clear();
         if (maxDist < 0) maxDist = GameConstants.MatchTouchDist;
-        var group = new List<Ball> { start };
-        var visited = new HashSet<int> { start.id };
-        var queue = new Queue<Ball>();
-        queue.Enqueue(start);
 
-        while (queue.Count > 0)
+        _findGroupVisited.Clear();
+        _findGroupQueue.Clear();
+        _findGroupVisited.Add(start.id);
+        _findGroupQueue.Enqueue(start);
+        results.Add(start);
+
+        while (_findGroupQueue.Count > 0)
         {
-            var cur = queue.Dequeue();
-            foreach (var t in GetTouching(cur, maxDist))
+            var cur = _findGroupQueue.Dequeue();
+            GetTouchingNonAlloc(cur, maxDist, _findGroupScratch);
+            for (int i = 0; i < _findGroupScratch.Count; i++)
             {
-                if (!visited.Contains(t.id) && t.ballColor == start.ballColor)
+                var t = _findGroupScratch[i];
+                if (!_findGroupVisited.Contains(t.id) && t.ballColor == start.ballColor)
                 {
-                    visited.Add(t.id);
-                    queue.Enqueue(t);
-                    group.Add(t);
+                    _findGroupVisited.Add(t.id);
+                    _findGroupQueue.Enqueue(t);
+                    results.Add(t);
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Allocating convenience wrapper. Prefer <see cref="FindGroupNonAlloc"/> on hot paths
+    /// or when the result is consumed synchronously; use this when the result must survive
+    /// across yields (e.g. passed to StartMatchSequence as matchGrp).
+    /// </summary>
+    public List<Ball> FindGroup(Ball start, float maxDist = -1)
+    {
+        var group = new List<Ball>(32);
+        FindGroupNonAlloc(start, maxDist, group);
         return group;
     }
 
@@ -102,11 +146,14 @@ public class MatchSystem : MonoBehaviour
 
     IEnumerator MatchSequenceCoroutine(int matchCount, List<Ball> targets, List<Ball> matchGrp, float coneBaseAngle, float coneAngle)
     {
-        var matchIds = new HashSet<int>(matchGrp.Select(b => b.id));
+        // Zero-alloc: reuse class-scoped HashSet instead of `new HashSet(matchGrp.Select(...))`
+        _matchIds.Clear();
+        for (int i = 0; i < matchGrp.Count; i++) _matchIds.Add(matchGrp[i].id);
         bool hasCone = matchCount >= 4 && coneAngle > 0;
 
-        // Create highlight rings for each target ball (pooled)
-        var rings = new List<GameObject>();
+        // Create highlight rings for each target ball (pooled). Reuse buffer.
+        _highlightRings.Clear();
+        var rings = _highlightRings;
         foreach (var b in targets)
         {
             if (b == null) continue;
@@ -133,7 +180,7 @@ public class MatchSystem : MonoBehaviour
             for (int i = 0; i < rings.Count && i < targets.Count; i++)
             {
                 if (targets[i] == null || rings[i] == null) continue;
-                bool isMatch = matchIds.Contains(targets[i].id);
+                bool isMatch = _matchIds.Contains(targets[i].id);
                 rings[i].transform.localScale = new Vector3(
                     ringSize / targets[i].transform.localScale.x,
                     ringSize / targets[i].transform.localScale.y, 1f);
@@ -187,8 +234,19 @@ public class MatchSystem : MonoBehaviour
         yield return new WaitForSeconds(GameConstants.SuckDuration);
 
         // Phase 3: Combo check → rotation
-        bool hasSingle = gm.Balls.Any(b =>
-            !GetTouching(b, GameConstants.MatchTouchDist).Any(nb => nb.ballColor == b.ballColor));
+        // Zero-alloc replacement for `gm.Balls.Any(b => !GetTouching(b, ...).Any(nb => ...))`:
+        //   outer scan + GetTouchingNonAlloc + manual inner scan breaks out on first neighbour.
+        bool hasSingle = false;
+        foreach (var b in gm.Balls)
+        {
+            GetTouchingNonAlloc(b, GameConstants.MatchTouchDist, _comboScratch);
+            bool hasSameColorNeighbor = false;
+            for (int i = 0; i < _comboScratch.Count; i++)
+            {
+                if (_comboScratch[i].ballColor == b.ballColor) { hasSameColorNeighbor = true; break; }
+            }
+            if (!hasSameColorNeighbor) { hasSingle = true; break; }
+        }
         if (hasSingle)
         {
             gm.comboCount++;
@@ -285,16 +343,21 @@ public class MatchSystem : MonoBehaviour
     /// </summary>
     void ComboBonus()
     {
-        var singles = new List<Ball>();
+        // Zero-alloc: reuse class-scoped list + non-alloc neighbour scan.
+        _comboSingles.Clear();
         foreach (var b in gm.Balls)
         {
-            bool hasMatch = GetTouching(b, GameConstants.MatchTouchDist)
-                .Any(t => t.ballColor == b.ballColor);
-            if (!hasMatch) singles.Add(b);
+            GetTouchingNonAlloc(b, GameConstants.MatchTouchDist, _comboScratch);
+            bool hasMatch = false;
+            for (int i = 0; i < _comboScratch.Count; i++)
+            {
+                if (_comboScratch[i].ballColor == b.ballColor) { hasMatch = true; break; }
+            }
+            if (!hasMatch) _comboSingles.Add(b);
         }
-        if (singles.Count == 0) return;
+        if (_comboSingles.Count == 0) return;
 
-        var target = singles[Random.Range(0, singles.Count)];
+        var target = _comboSingles[Random.Range(0, _comboSingles.Count)];
         Vector2 tPos = target.transform.position;
         Vector2 bhPos = gm.blackHole.position;
         float od = GameConstants.OverlapDistance;
@@ -343,17 +406,23 @@ public class MatchSystem : MonoBehaviour
         }
     }
 
+    void AddBuddyRing(Ball b, List<GameObject> into)
+    {
+        if (b == null) return;
+        var ring = fxPool.Get(FXPool.FXType.BuddyRing, b.GetComponent<SpriteRenderer>().sprite);
+        ring.transform.SetParent(b.transform, false);
+        ring.transform.localPosition = Vector3.zero;
+        into.Add(ring);
+    }
+
     IEnumerator BuddyFX(Ball target, Ball buddy)
     {
-        var rings = new List<GameObject>();
-        foreach (var b in new[] { target, buddy })
-        {
-            if (b == null) continue;
-            var ring = fxPool.Get(FXPool.FXType.BuddyRing, b.GetComponent<SpriteRenderer>().sprite);
-            ring.transform.SetParent(b.transform, false);
-            ring.transform.localPosition = Vector3.zero;
-            rings.Add(ring);
-        }
+        // Zero-alloc: dedicated class buffer (BuddyFX runs parallel to MatchSequenceCoroutine's
+        // final WaitForSeconds, so we can't share _highlightRings even if empty — keep isolated).
+        _buddyRings.Clear();
+        var rings = _buddyRings;
+        AddBuddyRing(target, rings);
+        AddBuddyRing(buddy, rings);
 
         float duration = GameConstants.BuddyFXDuration;
         float elapsed = 0f;
