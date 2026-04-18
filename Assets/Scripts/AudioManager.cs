@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 /// <summary>
 /// Singleton that manages all game sound effects.
@@ -33,7 +34,7 @@ public class AudioManager : MonoBehaviour
     private AudioClip clipWin;
     private AudioClip clipLose;
 
-    void Awake()
+    async void Awake()
     {
         if (Instance != null) { Destroy(gameObject); return; }
         Instance = this;
@@ -41,8 +42,36 @@ public class AudioManager : MonoBehaviour
         audioSource = gameObject.AddComponent<AudioSource>();
         audioSource.playOnAwake = false;
 
-        GenerateAllClips();
+        // Vibrator cache is cheap (a few JNI calls) — keep synchronous
         CacheVibrator();
+
+        // Procedural audio generation used to block the main thread for ~50-100ms
+        // on slower devices (nine loops of Mathf.Sin over ~90k samples combined).
+        // Run the pure-CPU sample math on a background thread; Play() methods
+        // safely no-op while clips are null, so any early call during startup
+        // (behind the splash screen) is simply silent rather than crashing.
+        try
+        {
+            ClipSpec[] specs = await Task.Run(BuildAllClipData);
+
+            // Back on main thread (Unity's UnitySynchronizationContext). Creating
+            // the AudioClip and uploading its samples MUST happen here because
+            // AudioClip.Create / SetData are Unity API and not thread-safe.
+            if (this == null) return; // GameObject destroyed during await
+            clipShoot    = BuildClip(specs[0]);
+            clipAttach   = BuildClip(specs[1]);
+            clipMatch3   = BuildClip(specs[2]);
+            clipMatch45  = BuildClip(specs[3]);
+            clipCombo    = BuildClip(specs[4]);
+            clipBHAbsorb = BuildClip(specs[5]);
+            clipBounce   = BuildClip(specs[6]);
+            clipWin      = BuildClip(specs[7]);
+            clipLose     = BuildClip(specs[8]);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"[AudioManager] Clip generation failed: {e}");
+        }
     }
 
     void CacheVibrator()
@@ -142,29 +171,61 @@ public class AudioManager : MonoBehaviour
     }
 
     // ===== SYNTH CLIP GENERATION =====
-    // Simple procedural audio — replace with real AudioClips when available.
-
-    void GenerateAllClips()
-    {
-        clipShoot   = GenerateTone(0.08f, 880, 0.3f, ToneType.Sine, fadeOut: true);
-        clipAttach  = GenerateTone(0.05f, 440, 0.2f, ToneType.Noise, fadeOut: true);
-        clipMatch3  = GenerateChirp(0.15f, 600, 1200, 0.4f);
-        clipMatch45 = GenerateChirp(0.25f, 400, 1600, 0.5f);
-        clipCombo   = GenerateArpeggio(new[] { 523f, 659f, 784f, 1047f }, 0.08f, 0.4f);
-        clipBHAbsorb = GenerateTone(0.2f, 120, 0.4f, ToneType.Sine, fadeOut: true);
-        clipBounce  = GenerateTone(0.03f, 660, 0.15f, ToneType.Square, fadeOut: true);
-        clipWin     = GenerateArpeggio(new[] { 523f, 659f, 784f, 1047f, 1319f }, 0.12f, 0.5f);
-        clipLose    = GenerateTone(0.4f, 200, 0.4f, ToneType.Sine, fadeOut: true, pitchDecay: 0.5f);
-    }
+    // Simple procedural audio. Sample arrays are generated on a background
+    // ThreadPool thread (pure CPU math — Mathf.Sin/Lerp are thread-safe), then
+    // uploaded to Unity's AudioClip on the main thread. This removes the startup
+    // frame spike that used to happen when all nine clips were built in Awake.
 
     enum ToneType { Sine, Square, Noise }
 
-    AudioClip GenerateTone(float duration, float freq, float amp, ToneType type,
-                           bool fadeOut = false, float pitchDecay = 0f)
+    /// <summary>
+    /// Per-clip specification built on the background thread. Holds only plain
+    /// data — no Unity objects, safe to construct off the main thread.
+    /// </summary>
+    struct ClipSpec
     {
-        int sampleRate = 44100;
+        public string name;
+        public float[] data;
+        public int sampleRate;
+    }
+
+    /// <summary>
+    /// Main-thread-only: create the Unity AudioClip and upload pre-computed samples.
+    /// </summary>
+    static AudioClip BuildClip(ClipSpec s)
+    {
+        var clip = AudioClip.Create(s.name, s.data.Length, 1, s.sampleRate, false);
+        clip.SetData(s.data, 0);
+        return clip;
+    }
+
+    /// <summary>
+    /// Background-thread entry point. Must NOT touch any Unity API — only pure math.
+    /// Uses System.Random for noise (UnityEngine.Random is not thread-safe).
+    /// </summary>
+    static ClipSpec[] BuildAllClipData()
+    {
+        var rng = new System.Random();
+        const int sr = 44100;
+        return new[]
+        {
+            new ClipSpec { name = "shoot",    sampleRate = sr, data = BuildToneData(0.08f, 880f, 0.3f,  ToneType.Sine,   fadeOut: true,  pitchDecay: 0f,   rng: rng) },
+            new ClipSpec { name = "attach",   sampleRate = sr, data = BuildToneData(0.05f, 440f, 0.2f,  ToneType.Noise,  fadeOut: true,  pitchDecay: 0f,   rng: rng) },
+            new ClipSpec { name = "match3",   sampleRate = sr, data = BuildChirpData(0.15f, 600f, 1200f, 0.4f) },
+            new ClipSpec { name = "match45",  sampleRate = sr, data = BuildChirpData(0.25f, 400f, 1600f, 0.5f) },
+            new ClipSpec { name = "combo",    sampleRate = sr, data = BuildArpeggioData(new[] { 523f, 659f, 784f, 1047f }, 0.08f, 0.4f) },
+            new ClipSpec { name = "bhAbsorb", sampleRate = sr, data = BuildToneData(0.2f,  120f, 0.4f,  ToneType.Sine,   fadeOut: true,  pitchDecay: 0f,   rng: rng) },
+            new ClipSpec { name = "bounce",   sampleRate = sr, data = BuildToneData(0.03f, 660f, 0.15f, ToneType.Square, fadeOut: true,  pitchDecay: 0f,   rng: rng) },
+            new ClipSpec { name = "win",      sampleRate = sr, data = BuildArpeggioData(new[] { 523f, 659f, 784f, 1047f, 1319f }, 0.12f, 0.5f) },
+            new ClipSpec { name = "lose",     sampleRate = sr, data = BuildToneData(0.4f,  200f, 0.4f,  ToneType.Sine,   fadeOut: true,  pitchDecay: 0.5f, rng: rng) },
+        };
+    }
+
+    static float[] BuildToneData(float duration, float freq, float amp, ToneType type,
+                                 bool fadeOut, float pitchDecay, System.Random rng)
+    {
+        const int sampleRate = 44100;
         int samples = (int)(duration * sampleRate);
-        var clip = AudioClip.Create("synth", samples, 1, sampleRate, false);
         var data = new float[samples];
 
         for (int i = 0; i < samples; i++)
@@ -181,21 +242,20 @@ public class AudioManager : MonoBehaviour
                     val = Mathf.Sin(2f * Mathf.PI * f * t) > 0 ? 1f : -1f;
                     break;
                 case ToneType.Noise:
-                    val = Random.Range(-1f, 1f);
+                    // System.Random — UnityEngine.Random is not thread-safe
+                    val = (float)(rng.NextDouble() * 2.0 - 1.0);
                     break;
             }
             float envelope = fadeOut ? (1f - (float)i / samples) : 1f;
             data[i] = val * amp * envelope;
         }
-        clip.SetData(data, 0);
-        return clip;
+        return data;
     }
 
-    AudioClip GenerateChirp(float duration, float startFreq, float endFreq, float amp)
+    static float[] BuildChirpData(float duration, float startFreq, float endFreq, float amp)
     {
-        int sampleRate = 44100;
+        const int sampleRate = 44100;
         int samples = (int)(duration * sampleRate);
-        var clip = AudioClip.Create("chirp", samples, 1, sampleRate, false);
         var data = new float[samples];
 
         for (int i = 0; i < samples; i++)
@@ -206,16 +266,14 @@ public class AudioManager : MonoBehaviour
             float envelope = 1f - progress;
             data[i] = Mathf.Sin(2f * Mathf.PI * freq * t) * amp * envelope;
         }
-        clip.SetData(data, 0);
-        return clip;
+        return data;
     }
 
-    AudioClip GenerateArpeggio(float[] freqs, float noteDuration, float amp)
+    static float[] BuildArpeggioData(float[] freqs, float noteDuration, float amp)
     {
-        int sampleRate = 44100;
+        const int sampleRate = 44100;
         int samplesPerNote = (int)(noteDuration * sampleRate);
         int totalSamples = samplesPerNote * freqs.Length;
-        var clip = AudioClip.Create("arpeggio", totalSamples, 1, sampleRate, false);
         var data = new float[totalSamples];
 
         for (int n = 0; n < freqs.Length; n++)
@@ -228,7 +286,6 @@ public class AudioManager : MonoBehaviour
                 data[idx] = Mathf.Sin(2f * Mathf.PI * freqs[n] * t) * amp * envelope;
             }
         }
-        clip.SetData(data, 0);
-        return clip;
+        return data;
     }
 }
