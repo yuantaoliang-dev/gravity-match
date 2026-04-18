@@ -69,22 +69,38 @@ public class FXPool : MonoBehaviour
         go.transform.localPosition = Vector3.zero;
         go.transform.localScale = Vector3.one;
 
-        // Determine type from name and push back
-        if (go.name.StartsWith("SuckGhost"))
-            pools[FXType.SuckGhost].Push(go);
-        else if (go.name.StartsWith("HighlightRing"))
-            pools[FXType.HighlightRing].Push(go);
-        else if (go.name.StartsWith("BuddyRing"))
-            pools[FXType.BuddyRing].Push(go);
+        // Route to the correct stack via marker component — O(1), no string
+        // compare, and impossible to silently drop an object (missing tag
+        // surfaces as a LogError instead of a quiet pool leak).
+        var tag = go.GetComponent<FXPoolTag>();
+        if (tag == null)
+        {
+            // Should never happen — all pooled objects are created via CreateFXObject.
+            Debug.LogError($"[FXPool] Return called on '{go.name}' which has no FXPoolTag — object leaked.");
+            return;
+        }
+        pools[tag.type].Push(go);
     }
 
     private GameObject CreateFXObject(FXType type)
     {
         var go = new GameObject(type.ToString());
         go.transform.SetParent(poolRoot, false);
+        go.AddComponent<FXPoolTag>().type = type;
         var sr = go.AddComponent<SpriteRenderer>();
         sr.sortingOrder = type == FXType.SuckGhost ? 5 : 15;
         sr.sharedMaterial = GameConstants.GetUnlitSpriteMaterial();
         return go;
     }
+}
+
+/// <summary>
+/// Runtime tag attached to pooled FX GameObjects. Lets <see cref="FXPool.Return"/>
+/// route objects back to the correct stack in O(1) without string comparison
+/// (previously used go.name.StartsWith, which was both slow and silently
+/// dropped any object whose name didn't match one of three hard-coded prefixes).
+/// </summary>
+public class FXPoolTag : MonoBehaviour
+{
+    public FXPool.FXType type;
 }
