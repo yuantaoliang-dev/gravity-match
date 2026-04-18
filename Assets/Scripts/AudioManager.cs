@@ -15,6 +15,13 @@ public class AudioManager : MonoBehaviour
 
     private AudioSource audioSource;
 
+#if UNITY_ANDROID && !UNITY_EDITOR
+    // Cached Android Vibrator to avoid per-call JNI lookup (expensive + GC)
+    private AndroidJavaObject vibrator;
+    private AndroidJavaClass vibrationEffectClass;
+    private int apiLevel;
+#endif
+
     // Cached synth clips (generated once at startup)
     private AudioClip clipShoot;
     private AudioClip clipAttach;
@@ -35,13 +42,42 @@ public class AudioManager : MonoBehaviour
         audioSource.playOnAwake = false;
 
         GenerateAllClips();
+        CacheVibrator();
+    }
+
+    void CacheVibrator()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (var buildVersion = new AndroidJavaClass("android.os.Build$VERSION"))
+            {
+                apiLevel = buildVersion.GetStatic<int>("SDK_INT");
+            }
+            using (var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+            using (var activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
+            {
+                vibrator = activity.Call<AndroidJavaObject>("getSystemService", "vibrator");
+            }
+            // API 26+ uses VibrationEffect; cache the class reference
+            if (apiLevel >= 26)
+            {
+                vibrationEffectClass = new AndroidJavaClass("android.os.VibrationEffect");
+            }
+            Debug.Log($"[AudioManager] Vibrator cached (API {apiLevel}, vibrator={(vibrator != null)})");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"[AudioManager] Failed to cache vibrator: {e.Message}");
+        }
+#endif
     }
 
     // ===== PUBLIC PLAY METHODS =====
 
     public void PlayShoot()    => Play(clipShoot, 0.5f);
     public void PlayAttach()   => Play(clipAttach, 0.4f);
-    public void PlayMatch3()   { Play(clipMatch3, 0.7f); Vibrate(50); }
+    public void PlayMatch3()   => Play(clipMatch3, 0.7f); // no haptic for 3-match
     public void PlayMatch45()  { Play(clipMatch45, 0.9f); Vibrate(100); }
     public void PlayCombo()    { Play(clipCombo, 0.8f); Vibrate(200); }
     public void PlayBHAbsorb() => Play(clipBHAbsorb, 0.6f);
@@ -61,17 +97,47 @@ public class AudioManager : MonoBehaviour
     void Vibrate(int milliseconds)
     {
 #if UNITY_ANDROID && !UNITY_EDITOR
+        // NOTE: Referencing Handheld.Vibrate() anywhere in the project signals Unity's
+        // build pipeline to auto-inject <uses-permission android:name="android.permission.VIBRATE" />
+        // into the generated AndroidManifest.xml. Without this reference the JNI Vibrator
+        // service exists but will not actually buzz on most Android devices.
+        if (vibrator == null)
+        {
+            // Fallback path (also ensures the permission reference is emitted)
+            Handheld.Vibrate();
+            return;
+        }
         try
         {
-            using (var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
-            using (var activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
-            using (var vibrator = activity.Call<AndroidJavaObject>("getSystemService", "vibrator"))
+            if (apiLevel >= 26 && vibrationEffectClass != null)
             {
-                if (vibrator != null)
-                    vibrator.Call("vibrate", (long)milliseconds);
+                // API 26+: VibrationEffect.createOneShot(ms, DEFAULT_AMPLITUDE=-1)
+                using (var effect = vibrationEffectClass.CallStatic<AndroidJavaObject>(
+                    "createOneShot", (long)milliseconds, -1))
+                {
+                    vibrator.Call("vibrate", effect);
+                }
+            }
+            else
+            {
+                // Legacy API
+                vibrator.Call("vibrate", (long)milliseconds);
             }
         }
-        catch (System.Exception) { }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"[AudioManager] Vibrate failed: {e.Message}");
+            // Fallback to built-in Unity API if JNI call fails
+            Handheld.Vibrate();
+        }
+#endif
+    }
+
+    void OnDestroy()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (vibrator != null) { vibrator.Dispose(); vibrator = null; }
+        if (vibrationEffectClass != null) { vibrationEffectClass.Dispose(); vibrationEffectClass = null; }
 #endif
     }
 
