@@ -109,17 +109,17 @@ public class LevelManager : MonoBehaviour
                     float d = bi.DistTo(bj);
                     if (d < minVis && d > 0.001f)
                     {
-                        Vector2 dir = ((Vector2)bj.transform.position - (Vector2)bi.transform.position).normalized;
+                        Vector2 dir = (bj.cachedPos - bi.cachedPos).normalized;
                         float push = minVis - d + 0.01f * GameConstants.WorldScale;
                         bool iP = pairIds.Contains(bi.id), jP = pairIds.Contains(bj.id);
                         if (iP && !jP)
-                            bj.transform.position += (Vector3)(dir * push);
+                            bj.SetPos(bj.cachedPos + dir * push);
                         else if (!iP && jP)
-                            bi.transform.position -= (Vector3)(dir * push);
+                            bi.SetPos(bi.cachedPos - dir * push);
                         else
                         {
-                            bi.transform.position -= (Vector3)(dir * push * 0.5f);
-                            bj.transform.position += (Vector3)(dir * push * 0.5f);
+                            bi.SetPos(bi.cachedPos - dir * push * 0.5f);
+                            bj.SetPos(bj.cachedPos + dir * push * 0.5f);
                         }
                         ClampBallPosition(bi);
                         ClampBallPosition(bj);
@@ -143,18 +143,18 @@ public class LevelManager : MonoBehaviour
             foreach (var g in grp) visited.Add(g.id);
             if (grp.Count != 2) continue;
 
-            Vector2 p0 = grp[0].transform.position;
-            Vector2 p1 = grp[1].transform.position;
+            Vector2 p0 = grp[0].cachedPos;
+            Vector2 p1 = grp[1].cachedPos;
             Vector2 mid = (p0 + p1) * 0.5f;
             Vector2 dir = (p1 - p0).normalized;
-            grp[0].transform.position = (Vector3)(mid - dir * od * 0.5f);
-            grp[1].transform.position = (Vector3)(mid + dir * od * 0.5f);
+            grp[0].SetPos(mid - dir * od * 0.5f);
+            grp[1].SetPos(mid + dir * od * 0.5f);
         }
     }
 
     void ClampBallPosition(Ball b)
     {
-        Vector2 pos = b.transform.position;
+        Vector2 pos = b.cachedPos;
         float r = GameConstants.BallRadius;
         float hh = gm.CamHH;
         float hw = gm.CamHW;
@@ -168,7 +168,7 @@ public class LevelManager : MonoBehaviour
             Vector2 dir = (pos - center).normalized;
             pos = center + dir * (gm.BHEventHorizon + r + 0.03f * GameConstants.WorldScale);
         }
-        b.transform.position = pos;
+        b.SetPos(pos);
     }
 
     // ===== WIN/LOSE =====

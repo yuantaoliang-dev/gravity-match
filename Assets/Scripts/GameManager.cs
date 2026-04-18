@@ -315,7 +315,7 @@ public class GameManager : MonoBehaviour
     void SpawnSuckGhost(Ball b)
     {
         var go = fxPool.Get(FXPool.FXType.SuckGhost, b.GetComponent<SpriteRenderer>().sprite);
-        go.transform.position = b.transform.position;
+        go.transform.position = b.cachedPos;
         var sr = go.GetComponent<SpriteRenderer>();
         sr.color = b.ballColor;
         float diam = GameConstants.BallRadius * 2f;
@@ -492,10 +492,12 @@ public class GameManager : MonoBehaviour
         float rad = remainingDiff * Mathf.Deg2Rad;
         foreach (var b in balls)
         {
-            Vector2 offset = (Vector2)b.transform.position - center;
+            // Read from cachedPos (avoids transform.position C++ boundary crossing)
+            Vector2 offset = b.cachedPos - center;
             float a = Mathf.Atan2(offset.y, offset.x) + rad;
             float d = offset.magnitude;
-            b.transform.position = center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * d;
+            Vector2 newPos = center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * d;
+            b.SetPos(newPos);
         }
         fieldAngle = rotationTarget;
         isRotating = false;
@@ -523,15 +525,16 @@ public class GameManager : MonoBehaviour
             fieldAngle += step;
         }
 
-        // Rotate all balls around BH center
+        // Rotate all balls around BH center (read + write via cachedPos / SetPos)
         Vector2 center = blackHole.position;
         float rad = step * Mathf.Deg2Rad;
         foreach (var b in balls)
         {
-            Vector2 offset = (Vector2)b.transform.position - center;
+            Vector2 offset = b.cachedPos - center;
             float a = Mathf.Atan2(offset.y, offset.x) + rad;
             float d = offset.magnitude;
-            b.transform.position = center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * d;
+            Vector2 newPos = center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * d;
+            b.SetPos(newPos);
         }
         ForceValidColors();
 

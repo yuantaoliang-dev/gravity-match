@@ -526,7 +526,7 @@ public class Shooter : MonoBehaviour
 
         foreach (var b in gm.Balls)
         {
-            float bx = b.transform.position.x;
+            float bx = b.cachedPos.x;
             if (aimX > 0)
             {
                 // Aiming right: check balls beyond right edge
@@ -608,7 +608,7 @@ public class Shooter : MonoBehaviour
             float minDistSq = float.MaxValue;
             foreach (var b in gm.Balls)
             {
-                float dSq = ((Vector2)b.transform.position - pos).sqrMagnitude;
+                float dSq = (b.cachedPos - pos).sqrMagnitude;
                 if (dSq < minDistSq) minDistSq = dSq;
             }
 
@@ -663,13 +663,13 @@ public class Shooter : MonoBehaviour
                     return;
                 }
 
-                // Hit detection (squared distance comparison)
+                // Hit detection (squared distance comparison, cachedPos avoids transform boundary)
                 Ball hitBall = null;
                 float hitDistSq = float.MaxValue;
                 float hdSq = GameConstants.HitDetectDist * GameConstants.HitDetectDist;
                 foreach (var b in gm.Balls)
                 {
-                    float dSq = ((Vector2)b.transform.position - pos).sqrMagnitude;
+                    float dSq = (b.cachedPos - pos).sqrMagnitude;
                     if (dSq < hdSq && dSq < hitDistSq)
                     {
                         hitDistSq = dSq;
@@ -685,7 +685,7 @@ public class Shooter : MonoBehaviour
                     projectile = null;
                     gm.SetCameraPanTarget(0);
 
-                    Vector2 hitCenter = hitBall.transform.position;
+                    Vector2 hitCenter = hitBall.cachedPos;
                     float od = GameConstants.OverlapDistance;
                     float hd = GameConstants.HitDetectDist;
 
@@ -698,7 +698,7 @@ public class Shooter : MonoBehaviour
                     foreach (var b in gm.Balls)
                     {
                         if (b.id == hitBall.id) continue;
-                        Vector2 bc = b.transform.position;
+                        Vector2 bc = b.cachedPos;
                         Vector2 db = pos - bc;
                         // Ray-circle intersection: |pos + t*vel - bc| = HitDetectDist
                         float bCoeff = 2f * Vector2.Dot(db, vel);
@@ -733,17 +733,23 @@ public class Shooter : MonoBehaviour
                     if (sameColorHit && secondHit != null && secondHit.ballColor == projColor)
                     {
                         var hitGroup = gm.FindGroup(hitBall, GameConstants.MatchTouchDist);
-                        bool alreadyConnected = hitGroup.Any(b => b.id == secondHit.id);
+                        // Manual membership check (replaces LINQ .Any)
+                        bool alreadyConnected = false;
+                        for (int gi = 0; gi < hitGroup.Count; gi++)
+                        {
+                            if (hitGroup[gi].id == secondHit.id) { alreadyConnected = true; break; }
+                        }
                         if (!alreadyConnected)
                         {
                             Vector2 contactPos = pos + vel * secondHitT;
-                            Vector2 dirFromSecond = (contactPos - (Vector2)secondHit.transform.position).normalized;
-                            newPos = (Vector2)secondHit.transform.position + dirFromSecond * od;
+                            Vector2 secondPos = secondHit.cachedPos;
+                            Vector2 dirFromSecond = (contactPos - secondPos).normalized;
+                            newPos = secondPos + dirFromSecond * od;
                             Debug.Log($"[GravityMatch] Slide-through: bridging separate groups");
                         }
                     }
 
-                    // Push away from other balls
+                    // Push away from other balls (up to 30 iterations × N balls — use cachedPos)
                     // Same color: use OverlapDistance (allow overlap)
                     // Different color: use MinVisDist (no visual overlap)
                     float pushNudge = 0.002f * GameConstants.WorldScale;
@@ -754,12 +760,13 @@ public class Shooter : MonoBehaviour
                         {
                             if (b2.id == hitBall.id) continue;
                             if (secondHit != null && b2.id == secondHit.id) continue;
-                            float d2 = Vector2.Distance(newPos, b2.transform.position);
+                            Vector2 bp = b2.cachedPos;
+                            float d2 = Vector2.Distance(newPos, bp);
                             bool sameColor = b2.ballColor == projColor;
                             float pushDist = sameColor ? (od - 0.005f * GameConstants.WorldScale) : diffColorDist;
                             if (d2 < pushDist)
                             {
-                                Vector2 pDir = (newPos - (Vector2)b2.transform.position).normalized;
+                                Vector2 pDir = (newPos - bp).normalized;
                                 newPos += pDir * (pushDist - d2 + pushNudge);
                                 pushed = true;
                             }
@@ -793,7 +800,7 @@ public class Shooter : MonoBehaviour
             if (grp.Count >= 4)
             {
                 Vector2 center = Vector2.zero;
-                foreach (var g in grp) center += (Vector2)g.transform.position;
+                foreach (var g in grp) center += g.cachedPos;
                 center /= grp.Count;
 
                 Vector2 bhPos = gm.blackHole.position;
@@ -808,7 +815,8 @@ public class Shooter : MonoBehaviour
                 {
                     if (matchIds.Contains(b.id)) continue;
                     if (colorOnly && b.ballColor != newBall.ballColor) continue;
-                    float a = Mathf.Atan2(b.transform.position.y - bhPos.y, b.transform.position.x - bhPos.x);
+                    Vector2 bp = b.cachedPos;
+                    float a = Mathf.Atan2(bp.y - bhPos.y, bp.x - bhPos.x);
                     float da = Mathf.DeltaAngle(baseAngle * Mathf.Rad2Deg, a * Mathf.Rad2Deg) * Mathf.Deg2Rad;
                     float bd = b.DistTo(bhPos);
                     if (bd < GameConstants.BallRadius) continue;
@@ -889,11 +897,11 @@ public class Shooter : MonoBehaviour
             if (pos.y > gm.PlayTopY) break;
             if ((pos - bhPos).sqrMagnitude < trajBhEHSq) break;
 
-            // Stop at ball hit (v21: dist < BR*1.7, squared comparison)
+            // Stop at ball hit (v21: dist < BR*1.7, squared comparison — cachedPos)
             bool hitBall = false;
             foreach (var b in gm.Balls)
             {
-                if (((Vector2)b.transform.position - pos).sqrMagnitude < hdSqTraj) { hitBall = true; break; }
+                if ((b.cachedPos - pos).sqrMagnitude < hdSqTraj) { hitBall = true; break; }
             }
             if (hitBall) break;
 

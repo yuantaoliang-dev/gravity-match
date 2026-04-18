@@ -358,7 +358,7 @@ public class MatchSystem : MonoBehaviour
         if (_comboSingles.Count == 0) return;
 
         var target = _comboSingles[Random.Range(0, _comboSingles.Count)];
-        Vector2 tPos = target.transform.position;
+        Vector2 tPos = target.cachedPos;
         Vector2 bhPos = gm.blackHole.position;
         float od = GameConstants.OverlapDistance;
         float hh = gm.CamHH;
@@ -380,7 +380,7 @@ public class MatchSystem : MonoBehaviour
             foreach (var b2 in gm.Balls)
             {
                 if (b2.id == target.id) continue;
-                if (Vector2.Distance(tryPos, b2.transform.position) < od - 0.01f * GameConstants.WorldScale)
+                if (Vector2.Distance(tryPos, b2.cachedPos) < od - 0.01f * GameConstants.WorldScale)
                 {
                     ok = false;
                     break;
