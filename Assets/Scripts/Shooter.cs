@@ -263,198 +263,105 @@ public class Shooter : MonoBehaviour
             return;
         }
 
-        // Handle input during Play state only (aim/shoot)
-        if (gm.state == GameManager.GameState.Play)
+        // Unified input pipeline for Play and Rotating states.
+        // Rotating differs only in that a valid release snaps the rotation to
+        // completion before firing (see ReleaseAim).
+        bool play = gm.state == GameManager.GameState.Play;
+        bool rotating = gm.state == GameManager.GameState.Rotating;
+        if (!play && !rotating) return;
+
+        ReadPointer(out bool justDown, out bool justUp, out bool isHeld, out Vector2 screenPos);
+
+        if (justDown && !aiming)
         {
-            HandleInput();
-            return;
+            if (!TryBeginAim()) return;
         }
 
-        // During Rotating: also poll input, but only to remember the intent.
-        // When rotation ends (state becomes Play), we fire immediately.
-        if (gm.state == GameManager.GameState.Rotating)
+        if (aiming && isHeld)
         {
-            PollInputDuringRotation();
+            UpdateAiming(screenPos);
+        }
+        else if (!aiming)
+        {
+            ClearAimVisuals();
+        }
+
+        if (justUp && aiming)
+        {
+            ReleaseAim(duringRotation: rotating);
         }
     }
 
+    // ===== INPUT PIPELINE =====
+    // Shared by Play and Rotating states. The only behavioural difference is in
+    // ReleaseAim: during Rotating, we also snap the rotation to completion
+    // before firing, so the shot matches the current (not final-animated) field.
+
     /// <summary>
-    /// While rotating, track touch drag and remember direction.
-    /// If user releases during rotation, fire immediately when rotation ends.
+    /// Unified pointer read. Produces edge events (justDown/justUp) and held state
+    /// for touch (with finger-ID tracking) and mouse (editor). Replaces the
+    /// hand-rolled versions previously duplicated in HandleInput /
+    /// PollInputDuringRotation.
     /// </summary>
-    void PollInputDuringRotation()
+    void ReadPointer(out bool justDown, out bool justUp, out bool isHeld, out Vector2 screenPos)
     {
-        // Track input the same way as HandleInput — require a Began touch or
-        // a MouseDown to start aiming. Don't pick up lingering touches.
-        Vector2 inputScreenPos = Vector2.zero;
-        bool pressed = false;
+        justDown = false;
+        justUp = false;
+        isHeld = false;
+        screenPos = Vector2.zero;
 
         if (Input.touchCount > 0)
         {
-            // Is our tracked finger still down?
+            // Still tracking a specific finger?
+            Touch? tracked = null;
             for (int i = 0; i < Input.touchCount; i++)
             {
                 var t = Input.GetTouch(i);
-                if (t.fingerId == activeTouchId &&
-                    t.phase != TouchPhase.Ended && t.phase != TouchPhase.Canceled)
+                if (t.fingerId == activeTouchId) { tracked = t; break; }
+            }
+
+            if (tracked.HasValue)
+            {
+                screenPos = tracked.Value.position;
+                var phase = tracked.Value.phase;
+                if (phase == TouchPhase.Ended || phase == TouchPhase.Canceled)
                 {
-                    inputScreenPos = t.position;
-                    pressed = true;
-                    break;
+                    justUp = true;
+                    activeTouchId = -1;
+                }
+                else
+                {
+                    isHeld = true;
                 }
             }
-            // If not tracking anyone yet, look for a fresh Began
-            if (!pressed && activeTouchId < 0)
+            else
             {
+                // Look for a fresh Began to start tracking — prevents lingering
+                // finger (e.g. still down from a UI button tap) being picked up.
                 for (int i = 0; i < Input.touchCount; i++)
                 {
                     var t = Input.GetTouch(i);
                     if (t.phase == TouchPhase.Began)
                     {
                         activeTouchId = t.fingerId;
-                        inputScreenPos = t.position;
-                        pressed = true;
-                        break;
-                    }
-                }
-            }
-        }
-        else
-        {
-            activeTouchId = -1;
-            if (activeMouse && Input.GetMouseButton(0))
-            {
-                inputScreenPos = Input.mousePosition;
-                pressed = true;
-            }
-            else if (Input.GetMouseButtonDown(0))
-            {
-                activeMouse = true;
-                inputScreenPos = Input.mousePosition;
-                pressed = true;
-            }
-            else if (!Input.GetMouseButton(0))
-            {
-                activeMouse = false;
-            }
-        }
-
-        if (pressed)
-        {
-            if (mainCamera == null) mainCamera = Camera.main;
-            if (mainCamera == null) return;
-
-            if (!aiming)
-            {
-                if (IsPointerOverUI()) { uiTouchBlocked = true; return; }
-                aiming = true;
-                uiTouchBlocked = false;
-                aimStartTime = Time.time;
-                aimVisible = false;
-            }
-
-            Vector2 inputWorld = mainCamera.ScreenToWorldPoint(inputScreenPos);
-            Vector2 shooterPos = transform.position;
-            Vector2 offset = inputWorld - shooterPos;
-            float minUp = GameConstants.BallRadius * 2f;
-            if (offset.y >= minUp && offset.y > Mathf.Abs(offset.x) * 0.3f)
-            {
-                aimDir = offset.normalized;
-                hasValidAim = true;
-
-                if (!aimVisible && Time.time - aimStartTime >= aimHoldThreshold)
-                    aimVisible = true;
-
-                if (aimVisible)
-                {
-                    ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
-                    ShowAimLine(shooterPos, aimDir);
-                    UpdateCameraPan(aimDir);
-                }
-            }
-            else
-            {
-                hasValidAim = false;
-                HideTrajectory();
-                HideAimLine();
-                gm.SetCameraPanTarget(0);
-            }
-        }
-        else if (aiming)
-        {
-            // Released during rotation with valid aim: snap rotation to
-            // completion and fire immediately (skip remaining animation).
-            // Otherwise (no valid aim): abandon.
-            // Short tap during rotation: aimVisible was never true → no pan was
-            // applied, walls stay at ±CamHW for the fired ball.
-            bool validAim = hasValidAim;
-            Vector2 dir = aimDir;
-            aiming = false;
-            hasValidAim = false;
-            aimVisible = false;
-            HideTrajectory();
-            HideAimLine();
-            gm.SetCameraPanTarget(0);
-            uiTouchBlocked = false;
-
-            if (validAim)
-            {
-                gm.SnapRotationAndFire();
-                Fire(dir);
-            }
-        }
-    }
-
-    void HandleInput()
-    {
-        // Detect input events (touch takes priority over mouse).
-        // Use touch ID tracking to avoid treating a lingering pre-existing touch
-        // (e.g. finger still down from a UI button tap) as a new shoot gesture.
-        bool justDown = false;
-        bool justUp = false;
-        Vector2 inputScreenPos = Vector2.zero;
-
-        if (Input.touchCount > 0)
-        {
-            // Find our tracked finger (if still present)
-            Touch? tracked = null;
-            for (int i = 0; i < Input.touchCount; i++)
-            {
-                var touch = Input.GetTouch(i);
-                if (touch.fingerId == activeTouchId) { tracked = touch; break; }
-            }
-
-            if (tracked.HasValue)
-            {
-                // Still following the same finger
-                inputScreenPos = tracked.Value.position;
-                justUp = tracked.Value.phase == TouchPhase.Ended || tracked.Value.phase == TouchPhase.Canceled;
-            }
-            else
-            {
-                // Look for a NEW Began touch to start tracking
-                for (int i = 0; i < Input.touchCount; i++)
-                {
-                    var touch = Input.GetTouch(i);
-                    if (touch.phase == TouchPhase.Began)
-                    {
-                        activeTouchId = touch.fingerId;
-                        inputScreenPos = touch.position;
+                        screenPos = t.position;
                         justDown = true;
+                        isHeld = true;
                         break;
                     }
                 }
             }
         }
-        else if (activeTouchId >= 0)
-        {
-            // Tracked touch disappeared (e.g. system gesture canceled it)
-            activeTouchId = -1;
-            justUp = aiming;
-        }
         else
         {
-            // Mouse input (editor only)
+            // Tracked touch disappeared (system gesture canceled, app lost focus)
+            if (activeTouchId >= 0)
+            {
+                activeTouchId = -1;
+                if (aiming) justUp = true;
+            }
+
+            // Mouse (editor)
             if (Input.GetMouseButtonDown(0))
             {
                 activeMouse = true;
@@ -462,7 +369,8 @@ public class Shooter : MonoBehaviour
             }
             if (activeMouse)
             {
-                inputScreenPos = Input.mousePosition;
+                screenPos = Input.mousePosition;
+                isHeld = Input.GetMouseButton(0);
                 if (Input.GetMouseButtonUp(0))
                 {
                     justUp = true;
@@ -470,92 +378,104 @@ public class Shooter : MonoBehaviour
                 }
             }
         }
+    }
 
-        bool isTouching = activeTouchId >= 0 || activeMouse;
+    /// <summary>
+    /// Begin aiming if the player just pressed and isn't already aiming.
+    /// Returns false (and sets uiTouchBlocked) if the press landed on UI.
+    /// </summary>
+    bool TryBeginAim()
+    {
+        bool uiBlock = IsPointerOverUI();
+        uiTouchBlocked = uiBlock;
+        Dbg.Log($"[Shooter] Aim begin: uiBlocked={uiBlock}");
+        if (uiBlock) return false;
+        aiming = true;
+        aimStartTime = Time.time;
+        aimVisible = false; // hidden until player holds past aimHoldThreshold
+        return true;
+    }
 
-        // Start aiming on press (skip if tapping UI)
-        if (justDown && !aiming)
+    /// <summary>
+    /// Update aim direction, trajectory, and camera pan while the pointer is held.
+    /// Validates the aim direction is clearly up (not a side-tap).
+    /// </summary>
+    void UpdateAiming(Vector2 screenPos)
+    {
+        if (mainCamera == null) mainCamera = Camera.main;
+        if (mainCamera == null) return;
+
+        Vector2 inputWorld = mainCamera.ScreenToWorldPoint(screenPos);
+        Vector2 shooterPos = transform.position;
+        Vector2 offset = inputWorld - shooterPos;
+
+        // Require touch to be clearly above shooter (at least 1 ball diameter up
+        // AND dominant y-component) to avoid firing on accidental side touches
+        float minUp = GameConstants.BallRadius * 2f;
+        if (offset.y >= minUp && offset.y > Mathf.Abs(offset.x) * 0.3f)
         {
-            uiTouchBlocked = IsPointerOverUI();
-            Dbg.Log($"[Shooter] Touch down: uiBlocked={uiTouchBlocked}, phase={(Input.touchCount > 0 ? Input.GetTouch(0).phase.ToString() : "mouse")}");
-            if (!uiTouchBlocked)
+            aimDir = offset.normalized;
+            hasValidAim = true;
+
+            // Reveal trajectory / enable camera pan only after the hold threshold.
+            // Short tap releases before this fires, keeping walls at original ±CamHW.
+            if (!aimVisible && Time.time - aimStartTime >= aimHoldThreshold)
+                aimVisible = true;
+
+            if (aimVisible)
             {
-                aiming = true;
-                aimStartTime = Time.time;
-                aimVisible = false; // hidden until player holds past threshold
-            }
-        }
-
-        // Update aim direction while dragging
-        if (aiming)
-        {
-            if (mainCamera == null) mainCamera = Camera.main;
-            if (mainCamera == null) return;
-            Vector2 inputWorld = mainCamera.ScreenToWorldPoint(inputScreenPos);
-            Vector2 shooterPos = transform.position;
-            Vector2 offset = inputWorld - shooterPos;
-
-            // Require touch to be clearly above shooter (at least 1 ball diameter up
-            // AND dominant y-component) to avoid firing on accidental side touches
-            float minUp = GameConstants.BallRadius * 2f;
-            if (offset.y >= minUp && offset.y > Mathf.Abs(offset.x) * 0.3f)
-            {
-                aimDir = offset.normalized;
-                hasValidAim = true;
-
-                // Reveal trajectory / enable camera pan only after the hold threshold.
-                // Short tap releases before this fires, keeping walls at original ±CamHW.
-                if (!aimVisible && Time.time - aimStartTime >= aimHoldThreshold)
-                    aimVisible = true;
-
-                if (aimVisible)
-                {
-                    ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
-                    ShowAimLine(shooterPos, aimDir);
-                    UpdateCameraPan(aimDir);
-                }
-            }
-            else
-            {
-                hasValidAim = false;
-                HideTrajectory();
-                HideAimLine();
-                gm.SetCameraPanTarget(0);
+                ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
+                ShowAimLine(shooterPos, aimDir);
+                UpdateCameraPan(aimDir);
             }
         }
         else
         {
-            hasValidAim = false;
-            HideTrajectory();
-            HideAimLine();
+            ClearAimVisuals();
+        }
+    }
+
+    /// <summary>
+    /// Player released. Fire if aim was valid, otherwise clean up silently.
+    /// If <paramref name="duringRotation"/>, snap the in-progress rotation to
+    /// completion first so the fired ball uses the final field layout.
+    /// </summary>
+    void ReleaseAim(bool duringRotation)
+    {
+        bool validAim = hasValidAim;
+        Vector2 dir = aimDir;
+        aiming = false;
+        hasValidAim = false;
+        aimVisible = false;
+        uiTouchBlocked = false;
+        HideTrajectory();
+        HideAimLine();
+
+        // Pan reset strategy preserves prior per-state behaviour:
+        //   - Play + valid fire: KEEP pan so projectile walls match the aim.
+        //     UpdateProjectile resets pan to 0 when the ball lands / flies off.
+        //   - Play + invalid:    reset pan (nothing was fired).
+        //   - Rotating (always): reset pan — SnapRotationAndFire recomputes the
+        //     field atomically, so the pre-snap pan target is no longer meaningful.
+        if (!validAim || duringRotation)
+        {
             gm.SetCameraPanTarget(0);
         }
 
-        // Fire on release (only if aim was valid at release)
-        if (justUp)
+        if (validAim)
         {
-            if (aiming)
-            {
-                bool validAim = hasValidAim;
-                aiming = false;
-                hasValidAim = false;
-                aimVisible = false;
-                HideTrajectory();
-                HideAimLine();
-                if (validAim)
-                {
-                    // Keep camera panned during projectile flight so physics
-                    // match what player aimed for. Pan back when ball lands.
-                    // Short tap: pan was never set, so walls stay at original ±CamHW.
-                    Fire(aimDir);
-                }
-                else
-                {
-                    gm.SetCameraPanTarget(0);
-                }
-            }
-            uiTouchBlocked = false;
+            if (duringRotation) gm.SnapRotationAndFire();
+            Fire(dir);
         }
+    }
+
+    /// <summary>Hide trajectory / aim-line and reset pan. Used when aim goes invalid mid-drag.</summary>
+    void ClearAimVisuals()
+    {
+        hasValidAim = false;
+        HideTrajectory();
+        HideAimLine();
+        gm.SetCameraPanTarget(0);
     }
 
     /// <summary>
