@@ -93,7 +93,7 @@ public class LevelSelectView : MonoBehaviour
     }
 
     /// <summary>Show the level select panel with current data.</summary>
-    public void Show(int levelCount, int[] stars, System.Action<int> onSelect)
+    public void Show(int levelCount, int[] stars, int[] bestScores, System.Action<int> onSelect)
     {
         // Ensure enough buttons in pool
         while (buttonPool.Count < levelCount)
@@ -119,7 +119,8 @@ public class LevelSelectView : MonoBehaviour
                 rt.anchoredPosition = new Vector2(startX + col * (BtnW + Gap), startY - row * (BtnH + Gap));
 
                 int lvIndex = i;
-                buttonPool[i].Bind(i, stars[i], () => {
+                int score = (bestScores != null && i < bestScores.Length) ? bestScores[i] : 0;
+                buttonPool[i].Bind(i, stars[i], score, () => {
                     onSelect(lvIndex);
                     gameObject.SetActive(false);
                 });

@@ -13,10 +13,12 @@ public class LevelManager : MonoBehaviour
 
     private List<LevelDef> levels;
     private int[] levelStars;
+    private int[] levelBestScores;
 
     public int CurrentLevel { get; private set; }
     public int LevelCount => levels.Count;
     public int[] LevelStars => levelStars;
+    public int[] LevelBestScores => levelBestScores;
     public LevelDef GetCurrentLevelDef() => levels[CurrentLevel];
 
     public void Init(GameManager gm, Camera cam)
@@ -25,6 +27,14 @@ public class LevelManager : MonoBehaviour
         this.cam = cam;
         levels = LevelDataBuilder.BuildAll();
         levelStars = new int[levels.Count];
+        levelBestScores = new int[levels.Count];
+
+        // Load persisted best records from PlayerPrefs
+        for (int i = 0; i < levels.Count; i++)
+        {
+            levelStars[i] = LevelProgressStore.GetStars(i);
+            levelBestScores[i] = LevelProgressStore.GetBestScore(i);
+        }
     }
 
     // ===== LEVEL LOADING =====
@@ -184,7 +194,12 @@ public class LevelManager : MonoBehaviour
             int remBonus = gm.ballsLeft * GameConstants.ScoreLeftover;
             gm.score += remBonus;
             int stars = gm.score >= lv.starScore3 ? 3 : gm.score >= lv.starScore2 ? 2 : 1;
+
+            // Update in-memory best (keeps max for this session) + persist to disk
             levelStars[CurrentLevel] = Mathf.Max(levelStars[CurrentLevel], stars);
+            levelBestScores[CurrentLevel] = Mathf.Max(levelBestScores[CurrentLevel], gm.score);
+            LevelProgressStore.SaveBest(CurrentLevel, stars, gm.score);
+
             bool hasNext = CurrentLevel < levels.Count - 1;
             if (AudioManager.Instance) AudioManager.Instance.PlayWin();
             gm.ui.ShowWin(stars, gm.score, gm.ballsLeft, hasNext);

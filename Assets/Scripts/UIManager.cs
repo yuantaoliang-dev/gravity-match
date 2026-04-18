@@ -457,6 +457,6 @@ public class UIManager : MonoBehaviour
         Debug.Log("[GravityMatch] ShowLevelSelect called");
         if (levelSelectView == null) return;
         var gm = GameManager.Instance;
-        levelSelectView.Show(gm.LevelCount, gm.LevelStars, i => gm.LoadLevel(i));
+        levelSelectView.Show(gm.LevelCount, gm.LevelStars, gm.LevelBestScores, i => gm.LoadLevel(i));
     }
 }

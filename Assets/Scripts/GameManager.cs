@@ -550,6 +550,7 @@ public class GameManager : MonoBehaviour
     public List<Ball> Balls => balls;
     public bool IsRotating => isRotating;
     public int[] LevelStars => levelManager.LevelStars;
+    public int[] LevelBestScores => levelManager.LevelBestScores;
     public int LevelCount => levelManager.LevelCount;
     public int currentLevel => levelManager.CurrentLevel;
 }
