@@ -72,3 +72,29 @@ public static class GameConstants
         return shader != null ? new Material(shader) : null;
     }
 }
+
+/// <summary>
+/// Debug log wrappers that compile down to no-ops in release builds.
+/// The [Conditional] attribute removes the call AND its arguments at the call site,
+/// so expensive string interpolation ($"...") is eliminated in production — including
+/// the int-boxing / bool.ToString() / string.Format allocations that used to leak
+/// every shot / match / input event.
+///
+/// Two stacked [Conditional] attributes are OR-combined: the log is kept when
+/// either UNITY_EDITOR or DEVELOPMENT_BUILD is defined. Play Store / retail
+/// builds have neither, so the call site disappears entirely.
+///
+/// Note: Debug.LogError / Debug.LogWarning intentionally are NOT wrapped — errors
+/// and exception-path warnings should still reach logcat in production so bug
+/// reports stay actionable.
+/// </summary>
+public static class Dbg
+{
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+    public static void Log(string msg) => Debug.Log(msg);
+
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+    public static void LogWarning(string msg) => Debug.LogWarning(msg);
+}

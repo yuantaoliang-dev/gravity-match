@@ -465,7 +465,7 @@ public class Shooter : MonoBehaviour
         if (justDown && !aiming)
         {
             uiTouchBlocked = IsPointerOverUI();
-            Debug.Log($"[Shooter] Touch down: uiBlocked={uiTouchBlocked}, phase={(Input.touchCount > 0 ? Input.GetTouch(0).phase.ToString() : "mouse")}");
+            Dbg.Log($"[Shooter] Touch down: uiBlocked={uiTouchBlocked}, phase={(Input.touchCount > 0 ? Input.GetTouch(0).phase.ToString() : "mouse")}");
             if (!uiTouchBlocked)
             {
                 aiming = true;
@@ -782,7 +782,7 @@ public class Shooter : MonoBehaviour
                             Vector2 secondPos = secondHit.cachedPos;
                             Vector2 dirFromSecond = (contactPos - secondPos).normalized;
                             newPos = secondPos + dirFromSecond * od;
-                            Debug.Log($"[GravityMatch] Slide-through: bridging separate groups");
+                            Dbg.Log($"[GravityMatch] Slide-through: bridging separate groups");
                         }
                     }
 
@@ -828,7 +828,7 @@ public class Shooter : MonoBehaviour
         // Standard v21 match detection: BFS with MatchTouchDist
         var grp = gm.FindGroup(newBall, GameConstants.MatchTouchDist);
 
-        Debug.Log($"[GravityMatch] ProcessMatch: group size={grp.Count}, color={GameConstants.ColorToHex(newBall.ballColor)}");
+        Dbg.Log($"[GravityMatch] ProcessMatch: group size={grp.Count}, color={GameConstants.ColorToHex(newBall.ballColor)}");
         if (grp.Count >= 3)
         {
             var allTargets = new List<Ball>(grp);
@@ -878,7 +878,7 @@ public class Shooter : MonoBehaviour
 
                 var coneExtra = gm.Balls.Where(b => hitIds.Contains(b.id)).ToList();
                 allTargets.AddRange(coneExtra);
-                Debug.Log($"[GravityMatch] Cone sweep: {grp.Count}-match, colorOnly={colorOnly}, coneExtra={coneExtra.Count}, totalTargets={allTargets.Count}");
+                Dbg.Log($"[GravityMatch] Cone sweep: {grp.Count}-match, colorOnly={colorOnly}, coneExtra={coneExtra.Count}, totalTargets={allTargets.Count}");
 
                 // Pass cone info for visual FX
                 gm.StartMatchSequence(grp.Count, allTargets, grp, baseAngle, coneAngle);

@@ -119,7 +119,7 @@ public class MatchSystem : MonoBehaviour
         gm.score += targets.Count * pts;
         gm.ui.UpdateHUD(gm.ballsLeft, gm.score, gm.Balls.Count);
 
-        Debug.Log($"[GravityMatch] StartMatchSequence: {matchCount}-match, targets={targets.Count}");
+        Dbg.Log($"[GravityMatch] StartMatchSequence: {matchCount}-match, targets={targets.Count}");
 
         // Audio + haptic
         if (AudioManager.Instance)
@@ -402,7 +402,7 @@ public class MatchSystem : MonoBehaviour
             StartCoroutine(BuddyFX(target, buddy));
             gm.score += GameConstants.ScoreComboBonus;
             gm.ui.UpdateHUD(gm.ballsLeft, gm.score, gm.Balls.Count);
-            Debug.Log($"[GravityMatch] 3x COMBO! Buddy spawned for {GameConstants.ColorToHex(target.ballColor)}");
+            Dbg.Log($"[GravityMatch] 3x COMBO! Buddy spawned for {GameConstants.ColorToHex(target.ballColor)}");
         }
     }
 

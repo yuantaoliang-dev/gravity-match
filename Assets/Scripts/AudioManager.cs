@@ -93,7 +93,7 @@ public class AudioManager : MonoBehaviour
             {
                 vibrationEffectClass = new AndroidJavaClass("android.os.VibrationEffect");
             }
-            Debug.Log($"[AudioManager] Vibrator cached (API {apiLevel}, vibrator={(vibrator != null)})");
+            Dbg.Log($"[AudioManager] Vibrator cached (API {apiLevel}, vibrator={(vibrator != null)})");
         }
         catch (System.Exception e)
         {

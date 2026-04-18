@@ -157,9 +157,9 @@ public class GameManager : MonoBehaviour
         CreateEdgeMask(true);
         CreateEdgeMask(false);
 
-        Debug.Log($"[GravityMatch] SafeArea: topInset={topInset:F3}, bottomInset={bottomInset:F3}, bhY={bhY:F2}, shooterY={safeBottom + shooterMargin:F2}, playTop={PlayTopY:F2}, playBottom={PlayBottomY:F2}");
+        Dbg.Log($"[GravityMatch] SafeArea: topInset={topInset:F3}, bottomInset={bottomInset:F3}, bhY={bhY:F2}, shooterY={safeBottom + shooterMargin:F2}, playTop={PlayTopY:F2}, playBottom={PlayBottomY:F2}");
 
-        Debug.Log($"[GravityMatch] Screen adapt: aspect={aspect:F3}, orthoSize={CamHH:F2}, width={designWidth}, bhY={bhY:F2}");
+        Dbg.Log($"[GravityMatch] Screen adapt: aspect={aspect:F3}, orthoSize={CamHH:F2}, width={designWidth}, bhY={bhY:F2}");
 
         // Pre-warm ball pool
         for (int i = 0; i < BallPoolPrewarm; i++)
