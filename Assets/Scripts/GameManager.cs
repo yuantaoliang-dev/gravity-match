@@ -48,9 +48,10 @@ public class GameManager : MonoBehaviour
     private bool isRotating = false;
 
     // ===== ZERO-ALLOC BUFFERS =====
-    // ForceValidColors runs every frame during Play — eliminating its allocations is the
-    // single biggest GC win in the project. Each buffer has a dedicated owner so there's
-    // no reentry corruption between PickNextColor, ForceValidColors, FillPairColorsNonAlloc.
+    // FillPairColorsNonAlloc runs on every field-change event (fire, match, combo,
+    // BH absorb, rotation end) — no longer per-frame. Each buffer has a dedicated
+    // owner so there's no reentry corruption between PickNextColor,
+    // ForceValidColors, FillPairColorsNonAlloc.
     private readonly HashSet<int>   _pairVisited       = new HashSet<int>();
     private readonly List<Ball>     _pairGroupScratch  = new List<Ball>(64);
     private readonly HashSet<Color> _colorSet          = new HashSet<Color>();
@@ -190,7 +191,11 @@ public class GameManager : MonoBehaviour
 
         if (state == GameState.Play)
         {
-            ForceValidColors();
+            // ForceValidColors is NOT called every frame — it runs only on
+            // field-change events (OnBallFired, MatchSystem RemoveBalls, combo
+            // buddy spawn, BH absorb, rotation end). Skipping per-frame here
+            // saves an O(n²) BFS pass (FillPairColorsNonAlloc) that used to
+            // dominate Update() during idle Play.
             blackHoleController.AutoAbsorb();
         }
         else if (state == GameState.Rotating)
@@ -435,6 +440,19 @@ public class GameManager : MonoBehaviour
         return _pickPcBuf[0];
     }
 
+    /// <summary>
+    /// Ensures currentColor and nextColor are still playable given the current
+    /// field configuration. Safe to call; O(n²) worst case.
+    ///
+    /// DO NOT call from Update(). Must run only on field-change events:
+    ///   - OnBallFired
+    ///   - MatchSystem MatchSequenceCoroutine (post RemoveBalls + post combo)
+    ///   - BlackHoleController.AutoAbsorb (when balls actually removed)
+    ///   - GameManager.SnapRotationAndFire and UpdateRotation (end-of-rotation)
+    ///
+    /// Calling per-frame re-introduces a full flood-fill pass that dominates
+    /// Update() CPU during idle Play.
+    /// </summary>
     public void ForceValidColors()
     {
         if (balls.Count == 0) return;
