@@ -41,10 +41,14 @@ public class BlackHoleController : MonoBehaviour
     private const float BallPulseFreq = 2.5f;    // radians/sec (slow breath)
 
     // ===== ZERO-ALLOC BUFFERS =====
-    // AutoAbsorb runs every frame during Play state — buffers reused across frames.
+    // AutoAbsorb + UpdateVisuals both run every frame in Play state. Each has
+    // its own id-set / BFS queue so they can't corrupt each other mid-call.
     private readonly HashSet<int> _absIds       = new HashSet<int>();
     private readonly List<Ball>   _absorbed     = new List<Ball>(32);
     private readonly List<Ball>   _touchScratch = new List<Ball>(64);
+    private readonly Queue<Ball>  _absBfsQueue  = new Queue<Ball>(32);
+    private readonly HashSet<int> _pulseIds     = new HashSet<int>();
+    private readonly Queue<Ball>  _pulseBfsQueue = new Queue<Ball>(32);
 
     public void Init(GameManager gm, Transform blackHoleTransform)
     {
@@ -173,9 +177,9 @@ public class BlackHoleController : MonoBehaviour
         }
 
         // Per-ball brightness pulse when ball is within one BallRadius of the
-        // disc's outer rim (i.e. ball edge is 0 to 1 BR outside disc). Absorb
-        // happens in AutoAbsorb when ball edge actually touches (d ≤ EH + BR),
-        // so the pulse zone is exactly (EH + BR, EH + 2×BR].
+        // disc's outer rim. Seed set: balls with d ∈ (EH+BR, EH+2×BR]. Then
+        // flood-fill via touching so any connected neighbour of a seed pulses
+        // too — a pair / chain reads as "one unit" about to enter the disc.
         if (gm != null && gm.Balls != null)
         {
             float zoneOuter = EventHorizon + 2f * GameConstants.BallRadius;
@@ -185,14 +189,38 @@ public class BlackHoleController : MonoBehaviour
             float pulseSin = Mathf.Sin(Time.time * BallPulseFreq);
             float pulseMul = 1f + BallPulseAmp * pulseSin;
 
+            // Seed: balls directly within the narrow pulse band.
+            _pulseIds.Clear();
+            _pulseBfsQueue.Clear();
             foreach (var b in gm.Balls)
             {
                 float dSq = b.SqrDistTo(bhPos);
-                // Inside pulse zone: past absorb threshold in position (but
-                // still slightly outside) means ball edge is within 1 BR of
-                // the disc outer rim.
-                bool inPulseZone = dSq > absThreshSq && dSq <= zoneOuterSq;
-                b.SetBrightnessMultiplier(inPulseZone ? pulseMul : 1f);
+                if (dSq > absThreshSq && dSq <= zoneOuterSq)
+                {
+                    _pulseIds.Add(b.id);
+                    _pulseBfsQueue.Enqueue(b);
+                }
+            }
+
+            // BFS expand via SAME-COLOR touching neighbours only — different-
+            // color balls are not considered part of the same connected unit.
+            // HashSet.Add returns false if already present.
+            while (_pulseBfsQueue.Count > 0)
+            {
+                var cur = _pulseBfsQueue.Dequeue();
+                gm.GetTouchingNonAlloc(cur, -1f, _touchScratch);
+                for (int i = 0; i < _touchScratch.Count; i++)
+                {
+                    var t = _touchScratch[i];
+                    if (t.ballColor != cur.ballColor) continue;
+                    if (_pulseIds.Add(t.id)) _pulseBfsQueue.Enqueue(t);
+                }
+            }
+
+            // Apply. Balls in the expanded set pulse; all others reset to base.
+            foreach (var b in gm.Balls)
+            {
+                b.SetBrightnessMultiplier(_pulseIds.Contains(b.id) ? pulseMul : 1f);
             }
         }
     }
@@ -208,31 +236,34 @@ public class BlackHoleController : MonoBehaviour
         if (gm.state != GameManager.GameState.Play || gm.shooter.HasProjectile) return;
 
         Vector2 center = bhTransform.position;
-        // Absorb the moment a ball's edge touches the ring (EventHorizon).
-        // This matches the visible boundary exactly — the invisible pulse
-        // zone outside is only a visual warning (brightness pulse in
-        // UpdateVisuals), not an absorb trigger.
+        // Seed: balls whose edge has touched the disc's outer rim (d ≤ EH+BR).
         float absThresh = EventHorizon + GameConstants.BallRadius;
         float absThreshSq = absThresh * absThresh;
         _absIds.Clear();
+        _absBfsQueue.Clear();
         foreach (var b in gm.Balls)
         {
             if (b.SqrDistTo(center) < absThreshSq)
+            {
                 _absIds.Add(b.id);
+                _absBfsQueue.Enqueue(b);
+            }
         }
         if (_absIds.Count == 0) return;
 
-        // Expand to touching neighbors (zero-alloc)
-        float pullRange = EventHorizon + GameConstants.BallRadius * 2.5f;
-        float pullRangeSq = pullRange * pullRange;
-        foreach (var b in gm.Balls)
+        // Flood-fill via SAME-COLOR touching — a connected same-color cluster
+        // is treated as one unit, so any same-color ball touching an absorbed
+        // ball gets absorbed too, chained through the whole cluster regardless
+        // of distance from BH. Different-color neighbours are NOT included.
+        while (_absBfsQueue.Count > 0)
         {
-            if (_absIds.Contains(b.id)) continue;
-            if (b.SqrDistTo(center) > pullRangeSq) continue;
-            gm.GetTouchingNonAlloc(b, -1, _touchScratch);
+            var cur = _absBfsQueue.Dequeue();
+            gm.GetTouchingNonAlloc(cur, -1f, _touchScratch);
             for (int i = 0; i < _touchScratch.Count; i++)
             {
-                if (_absIds.Contains(_touchScratch[i].id)) { _absIds.Add(b.id); break; }
+                var t = _touchScratch[i];
+                if (t.ballColor != cur.ballColor) continue;
+                if (_absIds.Add(t.id)) _absBfsQueue.Enqueue(t);
             }
         }
 
