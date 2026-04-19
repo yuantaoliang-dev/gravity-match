@@ -47,6 +47,13 @@ public class UIManager : MonoBehaviour
         if (starsText) starsText.text = "";
         if (resultTitle) resultTitle.text = "";
         if (resultDetail) resultDetail.text = "";
+
+        // The scene-authored `remainingCount` TMP is a legacy duplicate of
+        // ballsText. The actual remaining-ball warning is drawn by the Shooter
+        // next to its "next ball" preview, so hide this one unless the binding
+        // happens to point at ballsText itself.
+        if (remainingCount != null && remainingCount != ballsText)
+            remainingCount.gameObject.SetActive(false);
     }
 
     void Start()
@@ -65,7 +72,6 @@ public class UIManager : MonoBehaviour
 
         SetupCanvasScaler();
         SetupSafeAreaPanel();
-        SetupHUDLayout();
         SetupOverlayLayout();
         CreateRewardText();
         CreateLevelSelectUI();
@@ -91,7 +97,7 @@ public class UIManager : MonoBehaviour
     /// <summary>
     /// Create an empty SafeArea panel (anchored to screen safe area).
     /// Only used as parent for dynamically created UI. Scene elements
-    /// stay under Canvas and get safe-area offsets in SetupHUDLayout.
+    /// stay under Canvas at their authored RectTransform anchors.
     /// </summary>
     void SetupSafeAreaPanel()
     {
@@ -126,80 +132,7 @@ public class UIManager : MonoBehaviour
         return safe.yMin / Screen.height;
     }
 
-    /// <summary>Position HUD elements at top of screen matching v21 layout.</summary>
-    void SetupHUDLayout()
-    {
-        // Disable raycast on HUD panel and texts (so they don't block Levels button)
-        var hudPanel = ballsText?.transform.parent;
-        if (hudPanel != null)
-        {
-            var hudImg = hudPanel.GetComponent<Image>();
-            if (hudImg) hudImg.raycastTarget = false;
-        }
-        var canvas = GetComponentInParent<Canvas>();
-        if (canvas == null) canvas = FindFirstObjectByType<Canvas>();
-        if (canvas != null)
-        {
-            foreach (var tmp in canvas.GetComponentsInChildren<TextMeshProUGUI>(true))
-                tmp.raycastTarget = false;
 
-        }
-        // Level name: top center (canvas is within safe area via renderOutsideSafeArea=false)
-        if (levelNameText)
-        {
-            var rt = levelNameText.GetComponent<RectTransform>();
-            rt.anchorMin = new Vector2(0.5f, 1f);
-            rt.anchorMax = new Vector2(0.5f, 1f);
-            rt.anchoredPosition = new Vector2(0, -8);
-            rt.sizeDelta = new Vector2(200, 20);
-            levelNameText.fontSize = 12;
-            levelNameText.fontStyle = FontStyles.Bold;
-            levelNameText.alignment = TextAlignmentOptions.Center;
-        }
-
-        // v21 HUD: label on top, value below. Left=balls, Center=score, Right=targets
-        SetupHUDItem(ballsText, "balls", 0f, 1f, 40f);
-        SetupHUDItem(scoreText, "score", 0.5f, 0.5f, 0f);
-        SetupHUDItem(targetsText, "targets", 1f, 0f, -40f);
-
-        // Remaining count: hide (duplicate of ballsText)
-        if (remainingCount && remainingCount != ballsText)
-        {
-            remainingCount.gameObject.SetActive(false);
-        }
-    }
-
-    void SetupHUDItem(TextMeshProUGUI valueText, string label, float anchorX, float anchorXMax, float offsetX)
-    {
-        if (valueText == null) return;
-        var canvas = GetComponentInParent<Canvas>();
-        if (canvas == null) canvas = FindFirstObjectByType<Canvas>();
-
-        // Value text (canvas is within safe area)
-        var rt = valueText.GetComponent<RectTransform>();
-        rt.anchorMin = new Vector2(anchorX, 1);
-        rt.anchorMax = new Vector2(anchorX, 1);
-        rt.anchoredPosition = new Vector2(offsetX, -35);
-        rt.sizeDelta = new Vector2(70, 18);
-        valueText.fontSize = 14;
-        valueText.fontStyle = FontStyles.Bold;
-        valueText.alignment = TextAlignmentOptions.Center;
-
-        // Label above value (v21: small monospace label)
-        var labelGo = new GameObject($"Label_{label}");
-        labelGo.transform.SetParent(safeAreaRoot ?? canvas.transform, false);
-        var labelRT = labelGo.AddComponent<RectTransform>();
-        labelRT.anchorMin = new Vector2(anchorX, 1);
-        labelRT.anchorMax = new Vector2(anchorX, 1);
-        labelRT.anchoredPosition = new Vector2(offsetX, -23);
-        labelRT.sizeDelta = new Vector2(70, 14);
-        var labelText = labelGo.AddComponent<TextMeshProUGUI>();
-        labelText.text = label;
-        labelText.fontSize = 9;
-        labelText.alignment = TextAlignmentOptions.Center;
-        labelText.color = new Color(1, 1, 1, 0.4f); // v21: rgba(255,255,255,0.4)
-        labelText.raycastTarget = false;
-    }
 
     void SetupOverlayLayout()
     {

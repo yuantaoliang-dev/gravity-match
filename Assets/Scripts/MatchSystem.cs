@@ -255,7 +255,7 @@ public class MatchSystem : MonoBehaviour
                 gm.comboCount = 0;
                 ComboBonus();
                 if (AudioManager.Instance) AudioManager.Instance.PlayCombo();
-                gm.ui.ShowReward("3x COMBO! +300", new Color(1f, 0.9f, 0.43f));
+                gm.ui.ShowReward("3x COMBO!", new Color(1f, 0.9f, 0.43f));
                 gm.state = GameManager.GameState.Buddy;
                 yield return new WaitForSeconds(GameConstants.BuddyFXDuration);
             }
