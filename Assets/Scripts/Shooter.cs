@@ -198,20 +198,6 @@ public class Shooter : MonoBehaviour
         }
     }
 
-    // LineRenderer needs renderQueue=3000 (Transparent), which we don't want
-    // leaking onto the shared sprite Material (it would push ALL sprites into
-    // the transparent queue). Keep a separate cached instance just for lines.
-    static Material _lineMat;
-    static Material GetLineMaterial()
-    {
-        if (_lineMat != null) return _lineMat;
-        var shader = Shader.Find("Universal Render Pipeline/2D/Sprite-Unlit-Default");
-        if (shader == null) shader = Shader.Find("Sprites/Default");
-        if (shader == null) return null;
-        _lineMat = new Material(shader) { name = "LineShared", renderQueue = 3000 };
-        return _lineMat;
-    }
-
     void CreateTrajectoryDots()
     {
         // v21 style: pool of small dot sprites, positioned along trajectory.
@@ -248,7 +234,7 @@ public class Shooter : MonoBehaviour
         aimLine.endColor = new Color(1f, 1f, 1f, 0.3f);
         aimLine.sortingOrder = 10;
         aimLine.positionCount = 0;
-        aimLine.sharedMaterial = GetLineMaterial();
+        aimLine.sharedMaterial = GameConstants.GetUnlitLineMaterial();
     }
 
     void Update()

@@ -85,6 +85,24 @@ public static class GameConstants
     /// <summary>Deprecated alias. Use <see cref="GetUnlitSpriteMaterial"/> with sharedMaterial for batching.</summary>
     [System.Obsolete("Use GetUnlitSpriteMaterial() and assign via sr.sharedMaterial so the batcher can merge draw calls")]
     public static Material CreateUnlitSpriteMaterial() => GetUnlitSpriteMaterial();
+
+    /// <summary>
+    /// Shared material for LineRenderers (aim line, trajectory guide, BH event
+    /// horizon ring, etc). Same batching principle as GetUnlitSpriteMaterial
+    /// but with renderQueue set to Transparent — do NOT reuse the sprite
+    /// material for LineRenderers or every sprite will be pushed into the
+    /// transparent queue.
+    /// </summary>
+    private static Material _unlitLineMat;
+    public static Material GetUnlitLineMaterial()
+    {
+        if (_unlitLineMat != null) return _unlitLineMat;
+        var shader = Shader.Find("Universal Render Pipeline/2D/Sprite-Unlit-Default");
+        if (shader == null) shader = Shader.Find("Sprites/Default");
+        if (shader == null) return null;
+        _unlitLineMat = new Material(shader) { name = "UnlitLineShared", renderQueue = 3000 };
+        return _unlitLineMat;
+    }
 }
 
 /// <summary>

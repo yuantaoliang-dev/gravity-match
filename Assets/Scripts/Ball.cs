@@ -77,4 +77,26 @@ public class Ball : MonoBehaviour
     {
         return (cachedPos - point).sqrMagnitude;
     }
+
+    /// <summary>
+    /// Modulate rendered brightness while keeping the stored <see cref="ballColor"/>
+    /// as the baseline. Multiplier of 1 restores the base color exactly;
+    /// &gt;1 brightens (RGB clamped to 1), &lt;1 darkens. Used by
+    /// BlackHoleController to pulse balls inside the BH warning zone.
+    /// </summary>
+    public void SetBrightnessMultiplier(float multiplier)
+    {
+        if (sr == null) sr = GetComponent<SpriteRenderer>();
+        if (sr == null) return;
+        if (multiplier == 1f)
+        {
+            sr.color = ballColor;
+            return;
+        }
+        sr.color = new Color(
+            Mathf.Clamp01(ballColor.r * multiplier),
+            Mathf.Clamp01(ballColor.g * multiplier),
+            Mathf.Clamp01(ballColor.b * multiplier),
+            ballColor.a);
+    }
 }
