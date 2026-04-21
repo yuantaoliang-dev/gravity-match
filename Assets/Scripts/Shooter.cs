@@ -44,12 +44,13 @@ public class Shooter : MonoBehaviour
     // ball that will receive the shadow:
     //   * Index 0: the "firstHit" (primary target) — always used when the
     //              shot will attach.
-    //   * Index 1: the "secondHit" (slide-through target) — only used when
-    //              the projectile would slide through firstHit and wedge
-    //              between firstHit and another same-color ball, ending up
-    //              touching both. In that case BOTH balls get a shadow so
-    //              the player can read "this shot lands in the gap and
-    //              matches both of these".
+    //   * Index 1: the "secondHit" (any ball in the trajectory's continued
+    //              path within maxTravel = 4/3 BR) — rendered whenever the
+    //              ray-circle sweep past firstHit finds another ball, with
+    //              NO color / group filter. This is a PATH cue: "your aim
+    //              brushes this ball too", independent of whether the
+    //              projectile would physically reach it (e.g. different-
+    //              color firstHit still gets a second-ball preview).
     //
     // Each pair uses an EXCLUSIVE sortingOrder + matching mask range so
     // mask 0 clips only overlay 0, mask 1 clips only overlay 1. This is
@@ -73,9 +74,6 @@ public class Shooter : MonoBehaviour
     private const int PreviewOverlaySecondHitOrder = 6;
     private readonly SpriteRenderer[] previewOverlays = new SpriteRenderer[PreviewCount];
     private readonly SpriteMask[]     previewMasks    = new SpriteMask[PreviewCount];
-    // Reusable scratch list for slide-through group-membership check — avoids
-    // allocating a new FindGroup result list every aim frame.
-    private readonly List<Ball> _previewGroupScratch = new List<Ball>(32);
 
     // Shooter area visuals
     private SpriteRenderer breathingGlow;
@@ -184,7 +182,7 @@ public class Shooter : MonoBehaviour
             Dbg.Log($"[PreviewOverlay] Init OK — mask sprite='{ballSprite.name}' bounds={ballSprite.bounds.size}");
 
         // Bake the shared soft-edged stripe sprite once. All preview overlays
-        // (firstHit + slide-through secondHit) share this sprite; they only
+        // (firstHit + any second-ball-in-path) share this sprite; they only
         // differ by transform and tint.
         //
         // Gradient: 32×32 alpha-falloff texture. Each axis uses smoothstep
@@ -1065,17 +1063,19 @@ public class Shooter : MonoBehaviour
     ///     pClosest, rotated so its length aligns with the shot direction.
     ///   * Each ball's SpriteMask clips its own stripe to its own circle.
     ///
-    /// Slide-through case: when the projectile will match firstHit AND
-    /// there is a same-color ball in a DIFFERENT group within maxTravel =
-    /// 4/3 BR along the continuing trajectory, the projectile wedges in the
-    /// gap between them (see UpdateProjectile slide-through branch). In
-    /// that case BOTH balls get a shadow — the player reads "this shot
-    /// bridges these two groups".
+    /// Second-ball case: any ball the trajectory would reach within
+    /// maxTravel = 4/3 BR past firstHit ALSO gets a shadow, with no
+    /// color / group filter. This is wider than the real slide-through
+    /// physics branch (see <see cref="FindSecondBallInPath"/>) — the
+    /// shadow is a PATH cue, communicating "your aim sweeps across
+    /// these balls", independent of whether the projectile would
+    /// actually come to rest touching both.
     ///
     /// Result per ball:
     ///   * Dead-center hit → full ball tinted (stripe covers whole width).
     ///   * Grazing hit     → thin tinted slice on the hit side.
-    ///   * No hit / no slide-through secondary → that overlay stays hidden.
+    ///   * No first-hit    → both overlays hidden.
+    ///   * First hit only  → secondary overlay hidden.
     ///
     /// Requires GameManager's Update (and thus BH.UpdateVisuals) to run
     /// before Shooter's Update so per-frame pulse colors are applied before
@@ -1109,18 +1109,23 @@ public class Shooter : MonoBehaviour
         // Render shadow on firstHit (always, when we got this far).
         RenderPreviewStripe(0, firstHit, trajEnd, shotDir);
 
-        // Slide-through: only possible when firstHit is same-color as the
-        // shot. Otherwise the projectile stops at firstHit and there's no
-        // second ball to shadow.
-        if (firstHit.ballColor == shotColor)
+        // Second-ball preview: any ball the trajectory would reach within
+        // maxTravel past firstHit gets a shadow — regardless of color or
+        // group. This is a PATH cue (here's where your shot sweeps), not
+        // a slide-through prediction; the projectile may physically stop
+        // on firstHit and never touch this second ball, but the aim beam
+        // would still pass through its circle if firstHit weren't in the
+        // way, and that's what the shadow communicates.
+        Ball secondHit = FindSecondBallInPath(firstHit, trajEnd, shotDir);
+        if (secondHit != null)
         {
-            Ball secondHit = FindSlideThroughSecondHit(firstHit, trajEnd, shotDir, shotColor);
-            if (secondHit != null)
-            {
-                RenderPreviewStripe(1, secondHit, trajEnd, shotDir);
-                Dbg.Log($"[PreviewOverlay] slide-through preview: first={firstHit.id} second={secondHit.id}");
-            }
+            RenderPreviewStripe(1, secondHit, trajEnd, shotDir);
+            Dbg.Log($"[PreviewOverlay] two-ball preview: first={firstHit.id} second={secondHit.id}");
         }
+        // shotColor parameter is no longer read here (the color-gated
+        // slide-through branch was removed), but the signature is kept
+        // for call-site compatibility with Shooter.UpdateAiming.
+        _ = shotColor;
     }
 
     /// <summary>
@@ -1203,17 +1208,27 @@ public class Shooter : MonoBehaviour
     }
 
     /// <summary>
-    /// Mirror of UpdateProjectile's slide-through detection. Given that the
-    /// projectile has reached <paramref name="firstHit"/> at <paramref name="trajEnd"/>
-    /// moving along <paramref name="shotDir"/>, find a second same-color ball
-    /// (if any) that the projectile would also touch within maxTravel =
-    /// 4/3 BR of continued travel — but ONLY if firstHit and the candidate
-    /// are currently in DIFFERENT connected groups. Matches the real
-    /// physics-time branch in UpdateProjectile exactly, so the preview
-    /// matches what the shot actually does.
+    /// Purely geometric search for a SECOND ball the trajectory would
+    /// reach within <c>maxTravel = 4/3·BR</c> past <paramref name="firstHit"/>,
+    /// ignoring color and group membership.
+    ///
+    /// Originally this enforced same-color + different-group gates so the
+    /// preview matched the real slide-through physics branch. The preview
+    /// intent has since widened — any ball that the aimed trajectory
+    /// <b>could plausibly brush</b> should receive a shadow, even if the
+    /// projectile would actually come to rest on firstHit alone (e.g.
+    /// different-color firstHit, or same-color same-group firstHit). The
+    /// shadow is a PATH cue, not a prediction of final ball-placement
+    /// geometry.
+    ///
+    /// Ray–circle maths identical to the secondHit sweep inside
+    /// <c>UpdateProjectile</c>: solve |trajEnd + t·shotDir − bc| = hd for
+    /// t, take the entry root, keep the nearest candidate whose t lies
+    /// in [0, maxTravel]. Non-alloc — the foreach over <c>gm.Balls</c>
+    /// is O(n) and all scratch state fits in locals.
     /// </summary>
-    /// <returns>The slide-through second ball, or null if no slide-through.</returns>
-    Ball FindSlideThroughSecondHit(Ball firstHit, Vector2 trajEnd, Vector2 shotDir, Color projColor)
+    /// <returns>The nearest second ball in path, or null if none.</returns>
+    Ball FindSecondBallInPath(Ball firstHit, Vector2 trajEnd, Vector2 shotDir)
     {
         float hd = GameConstants.HitDetectDist;
         float hdSq = hd * hd;
@@ -1225,8 +1240,6 @@ public class Shooter : MonoBehaviour
         foreach (var b in gm.Balls)
         {
             if (b.id == firstHit.id) continue;
-            // Slide-through requires BOTH balls match projectile color.
-            if (b.ballColor != projColor) continue;
 
             Vector2 bc = b.cachedPos;
             Vector2 db = trajEnd - bc;
@@ -1247,18 +1260,6 @@ public class Shooter : MonoBehaviour
             }
         }
 
-        if (candidate == null) return null;
-
-        // Final gate: firstHit and candidate must be in DIFFERENT groups —
-        // otherwise the projectile would just fatten the existing group,
-        // no slide-through happens, and the second-ball shadow would be a
-        // lie. Uses the non-alloc FindGroup variant to keep the aim frame
-        // GC-clean.
-        gm.FindGroupNonAlloc(firstHit, GameConstants.MatchTouchDist, _previewGroupScratch);
-        for (int i = 0; i < _previewGroupScratch.Count; i++)
-        {
-            if (_previewGroupScratch[i].id == candidate.id) return null;
-        }
         return candidate;
     }
 
