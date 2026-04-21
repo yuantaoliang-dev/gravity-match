@@ -40,6 +40,43 @@ public class Shooter : MonoBehaviour
     private List<SpriteRenderer> trajDots = new List<SpriteRenderer>();
     private List<Vector2> trajPoints = new List<Vector2>(400);
 
+    // Landing-preview overlay. Two parallel (overlay, mask) pairs — one per
+    // ball that will receive the shadow:
+    //   * Index 0: the "firstHit" (primary target) — always used when the
+    //              shot will attach.
+    //   * Index 1: the "secondHit" (slide-through target) — only used when
+    //              the projectile would slide through firstHit and wedge
+    //              between firstHit and another same-color ball, ending up
+    //              touching both. In that case BOTH balls get a shadow so
+    //              the player can read "this shot lands in the gap and
+    //              matches both of these".
+    //
+    // Each pair uses an EXCLUSIVE sortingOrder + matching mask range so
+    // mask 0 clips only overlay 0, mask 1 clips only overlay 1. This is
+    // why they're at 7 and 6 respectively, with mask ranges [7,7] and [6,6]
+    // — overlapping ranges would have each mask affect both overlays and
+    // the two shadows would bleed onto each other's balls.
+    //
+    // Sorting stack for the preview overlays:
+    //     balls = 2
+    //     BH accretion disc = 3
+    //     → overlay 1 (secondHit) = 6
+    //     → overlay 0 (firstHit)  = 7
+    //     top/bottom edge mask (HUD background) = 8
+    //     trajectory dots = 10
+    //     shooter visuals = 12+
+    // Both overlays stay BELOW the edge mask (8) so target balls that drift
+    // into the HUD safe-area zone don't get their hidden half drawn back in
+    // by the shadow stripe.
+    private const int PreviewCount = 2;
+    private const int PreviewOverlayFirstHitOrder  = 7;
+    private const int PreviewOverlaySecondHitOrder = 6;
+    private readonly SpriteRenderer[] previewOverlays = new SpriteRenderer[PreviewCount];
+    private readonly SpriteMask[]     previewMasks    = new SpriteMask[PreviewCount];
+    // Reusable scratch list for slide-through group-membership check — avoids
+    // allocating a new FindGroup result list every aim frame.
+    private readonly List<Ball> _previewGroupScratch = new List<Ball>(32);
+
     // Shooter area visuals
     private SpriteRenderer breathingGlow;
     private SpriteRenderer colorGlow;
@@ -130,6 +167,108 @@ public class Shooter : MonoBehaviour
         CreateTrajectoryDots();
         CreateAimLine();
         CreateComboDisplay();
+        CreatePreviewOverlay();
+    }
+
+    void CreatePreviewOverlay()
+    {
+        Sprite ballSprite = currentBallDisplay ? currentBallDisplay.sprite : null;
+
+        // Sanity check — if the sprite is null or currentBallDisplay isn't wired
+        // in the Inspector, the whole preview system is silently broken.
+        if (currentBallDisplay == null)
+            Debug.LogError("[PreviewOverlay] currentBallDisplay is not assigned in Inspector — preview will not render.");
+        else if (ballSprite == null)
+            Debug.LogError("[PreviewOverlay] currentBallDisplay.sprite is null — preview mask will have no shape.");
+        else
+            Dbg.Log($"[PreviewOverlay] Init OK — mask sprite='{ballSprite.name}' bounds={ballSprite.bounds.size}");
+
+        // Bake the shared soft-edged stripe sprite once. All preview overlays
+        // (firstHit + slide-through secondHit) share this sprite; they only
+        // differ by transform and tint.
+        //
+        // Gradient: 32×32 alpha-falloff texture. Each axis uses smoothstep
+        // from an inner plateau out to 0 at the edge, then the two are
+        // multiplied to give a rounded-rectangle / "soft stadium" alpha
+        // field. Bilinear filtering + clamped wrap means the gradient
+        // stretches smoothly when the stripe is scaled up, so the rendered
+        // edges inside the target ball are gently feathered, NOT a hard
+        // rectangle side.
+        //
+        // Plateau sizes tuned to give a defined shadow, not a fuzzy blob:
+        //   * Width plateau 0.65 — solid 65% of the width, 35% falloff on
+        //     the two long edges. Earlier we used 0.35 which left most of
+        //     the stripe in the falloff, reading as "blurry smudge" rather
+        //     than "shadow band".
+        //   * Length plateau 0.80 — only 20% falloff at the ends (which
+        //     the circular mask clips anyway, so this barely matters; the
+        //     tiny remaining feather hides any rasterization seam at the
+        //     mask boundary).
+        const int size = 32;
+        var stripeTex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+        {
+            filterMode = FilterMode.Bilinear,
+            wrapMode   = TextureWrapMode.Clamp,
+            name       = "PreviewStripeTex",
+        };
+        var pixels = new Color[size * size];
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float nx = (x / (float)(size - 1)) * 2f - 1f; // -1 .. 1
+                float ny = (y / (float)(size - 1)) * 2f - 1f;
+                float aX = Mathf.SmoothStep(1f, 0.65f, Mathf.Abs(nx));
+                float aY = Mathf.SmoothStep(1f, 0.80f, Mathf.Abs(ny));
+                pixels[y * size + x] = new Color(1f, 1f, 1f, aX * aY);
+            }
+        }
+        stripeTex.SetPixels(pixels);
+        stripeTex.Apply();
+        // pixelsPerUnit = size → sprite is 1×1 world unit at localScale 1,
+        // preserving the (1×1) scale contract so UpdatePreviewOverlay's
+        // localScale math stays unchanged.
+        var stripeSprite = Sprite.Create(stripeTex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), size);
+
+        // Build the two parallel (mask, overlay) pairs with NON-OVERLAPPING
+        // sortingOrder ranges, so mask 0 clips only overlay 0 and mask 1
+        // clips only overlay 1 (otherwise both shadows would be clipped to
+        // the union of both balls' circles, bleeding across).
+        int[] overlayOrders = { PreviewOverlayFirstHitOrder, PreviewOverlaySecondHitOrder };
+        for (int i = 0; i < PreviewCount; i++)
+        {
+            int order = overlayOrders[i];
+            string tag = i == 0 ? "FirstHit" : "SecondHit";
+
+            // Mask: placed at its ball each frame. Range is a degenerate
+            // single-value [order, order] so only the matching overlay at
+            // that sortingOrder is inside this mask's affect range.
+            var maskGo = new GameObject($"PreviewMask_{tag}");
+            maskGo.transform.SetParent(transform, false);
+            var mask = maskGo.AddComponent<SpriteMask>();
+            mask.sprite = ballSprite;
+            mask.alphaCutoff = 0.5f; // ball sprite is solid white — 0.5 is safe
+            mask.isCustomRangeActive = true;
+            mask.backSortingOrder  = order;
+            mask.frontSortingOrder = order;
+            mask.enabled = false;
+            previewMasks[i] = mask;
+
+            // Overlay: ball-specific stripe tinted with that ball's shadow.
+            // HARDCODED VisibleInsideMask — the older Inspector toggle to
+            // bypass masking turned into a footgun (flipped on once, the
+            // stripe then bleeds over everything unmasked), so masking is
+            // no longer optional.
+            var overlayGo = new GameObject($"PreviewOverlay_{tag}");
+            overlayGo.transform.SetParent(transform, false);
+            var overlay = overlayGo.AddComponent<SpriteRenderer>();
+            overlay.sprite = stripeSprite;
+            overlay.sortingOrder = order;
+            overlay.maskInteraction = SpriteMaskInteraction.VisibleInsideMask;
+            overlay.sharedMaterial = GameConstants.GetUnlitSpriteMaterial();
+            overlay.enabled = false;
+            previewOverlays[i] = overlay;
+        }
     }
 
     void CreateComboDisplay()
@@ -410,7 +549,8 @@ public class Shooter : MonoBehaviour
 
             if (aimVisible)
             {
-                ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
+                Ball firstHit = ShowTrajectory(shooterPos, aimDir * GameConstants.BallSpeed);
+                UpdatePreviewOverlay(firstHit, gm.currentColor);
                 ShowAimLine(shooterPos, aimDir);
                 UpdateCameraPan(aimDir);
             }
@@ -814,7 +954,12 @@ public class Shooter : MonoBehaviour
     }
 
     // ===== TRAJECTORY PREVIEW (v21 style: dotted path) =====
-    void ShowTrajectory(Vector2 start, Vector2 vel)
+    /// <summary>
+    /// Simulate the trajectory, render it as dots, and return the first Ball
+    /// the path would hit (or null if it flies off-screen / into BH / times
+    /// out). Caller uses the return value to colour-code the aim beam.
+    /// </summary>
+    Ball ShowTrajectory(Vector2 start, Vector2 vel)
     {
         // Simulate trajectory matching v21: half-speed steps, stop at ball/BH
         trajPoints.Clear();
@@ -837,6 +982,8 @@ public class Shooter : MonoBehaviour
         float trajBhEHSq = trajBhEH * trajBhEH;
         float hdSqTraj = hd * hd;
 
+        Ball firstHit = null;
+
         for (int i = 0; i < 400; i++) // v21 max 400 steps
         {
             pos += v;
@@ -852,13 +999,18 @@ public class Shooter : MonoBehaviour
             if (pos.y > gm.PlayTopY) break;
             if ((pos - bhPos).sqrMagnitude < trajBhEHSq) break;
 
-            // Stop at ball hit (v21: dist < BR*1.7, squared comparison — cachedPos)
-            bool hitBall = false;
+            // Stop at ball hit — capture the Ball reference (not just a bool)
+            // so the caller can highlight it as the previewed target.
+            Ball hitBall = null;
             foreach (var b in gm.Balls)
             {
-                if ((b.cachedPos - pos).sqrMagnitude < hdSqTraj) { hitBall = true; break; }
+                if ((b.cachedPos - pos).sqrMagnitude < hdSqTraj) { hitBall = b; break; }
             }
-            if (hitBall) break;
+            if (hitBall != null)
+            {
+                firstHit = hitBall;
+                break;
+            }
 
             trajPoints.Add(pos);
         }
@@ -883,12 +1035,231 @@ public class Shooter : MonoBehaviour
         // Hide unused dots
         for (int i = dotIdx; i < MaxTrajDots; i++)
             trajDots[i].gameObject.SetActive(false);
+
+        return firstHit;
     }
 
     void HideTrajectory()
     {
         for (int i = 0; i < trajDots.Count; i++)
             trajDots[i].gameObject.SetActive(false);
+        for (int i = 0; i < PreviewCount; i++)
+        {
+            if (previewOverlays[i] != null) previewOverlays[i].enabled = false;
+            if (previewMasks[i]    != null) previewMasks[i].enabled    = false;
+        }
+    }
+
+    /// <summary>
+    /// Tint the target ball(s) in the region the projectile's PATH would
+    /// sweep through. Not a ghost-ball at the landing spot — the visual is a
+    /// shot-direction stripe clipped to each affected ball's circle.
+    ///
+    /// Geometry:
+    ///   * The projectile (circle, radius BR) sweeps a capsule of half-width
+    ///     BR along its trajectory line.
+    ///   * For each affected ball, we find pClosest — the perpendicular foot
+    ///     from that ball's center onto the trajectory line. A dead-center
+    ///     shot puts pClosest at the ball's center; grazing shots offset it.
+    ///   * A rectangle stripe of width 2×BR × length 4×BR is drawn at
+    ///     pClosest, rotated so its length aligns with the shot direction.
+    ///   * Each ball's SpriteMask clips its own stripe to its own circle.
+    ///
+    /// Slide-through case: when the projectile will match firstHit AND
+    /// there is a same-color ball in a DIFFERENT group within maxTravel =
+    /// 4/3 BR along the continuing trajectory, the projectile wedges in the
+    /// gap between them (see UpdateProjectile slide-through branch). In
+    /// that case BOTH balls get a shadow — the player reads "this shot
+    /// bridges these two groups".
+    ///
+    /// Result per ball:
+    ///   * Dead-center hit → full ball tinted (stripe covers whole width).
+    ///   * Grazing hit     → thin tinted slice on the hit side.
+    ///   * No hit / no slide-through secondary → that overlay stays hidden.
+    ///
+    /// Requires GameManager's Update (and thus BH.UpdateVisuals) to run
+    /// before Shooter's Update so per-frame pulse colors are applied before
+    /// the overlay renders. Enforced via <c>[DefaultExecutionOrder(-10)]</c>
+    /// on GameManager.
+    /// </summary>
+    void UpdatePreviewOverlay(Ball firstHit, Color shotColor)
+    {
+        // Disable both pairs up front — any early return below must leave
+        // both overlays hidden so stale shadows don't persist after the aim
+        // direction changes.
+        for (int i = 0; i < PreviewCount; i++)
+        {
+            if (previewOverlays[i] != null) previewOverlays[i].enabled = false;
+            if (previewMasks[i]    != null) previewMasks[i].enabled    = false;
+        }
+
+        int count = trajPoints.Count;
+        // Need ≥ 2 trajectory points to derive shot direction from the last
+        // segment (bounces can change it mid-flight, so (hitCenter - trajEnd)
+        // isn't always correct).
+        if (firstHit == null || count < 2) return;
+        if (previewOverlays[0] == null || previewMasks[0] == null) return;
+
+        Vector2 trajEnd = trajPoints[count - 1];
+        Vector2 shotDir = trajPoints[count - 1] - trajPoints[count - 2];
+        float shotMag = shotDir.magnitude;
+        if (shotMag < 1e-4f) return;
+        shotDir /= shotMag;
+
+        // Render shadow on firstHit (always, when we got this far).
+        RenderPreviewStripe(0, firstHit, trajEnd, shotDir);
+
+        // Slide-through: only possible when firstHit is same-color as the
+        // shot. Otherwise the projectile stops at firstHit and there's no
+        // second ball to shadow.
+        if (firstHit.ballColor == shotColor)
+        {
+            Ball secondHit = FindSlideThroughSecondHit(firstHit, trajEnd, shotDir, shotColor);
+            if (secondHit != null)
+            {
+                RenderPreviewStripe(1, secondHit, trajEnd, shotDir);
+                Dbg.Log($"[PreviewOverlay] slide-through preview: first={firstHit.id} second={secondHit.id}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Position, scale, rotate, tint and enable the (mask, overlay) pair at
+    /// <paramref name="idx"/> to draw a path-swept shadow inside
+    /// <paramref name="ball"/>. See UpdatePreviewOverlay for the full
+    /// geometry rationale.
+    /// </summary>
+    void RenderPreviewStripe(int idx, Ball ball, Vector2 trajEnd, Vector2 shotDir)
+    {
+        var overlay = previewOverlays[idx];
+        var mask    = previewMasks[idx];
+        if (overlay == null || mask == null) return;
+
+        Vector2 hitCenter = ball.cachedPos;
+
+        // pClosest = perpendicular projection of the ball's center onto the
+        // trajectory line. See UpdatePreviewOverlay's summary for derivation.
+        Vector2 q = hitCenter - trajEnd;
+        float tClosest = Vector2.Dot(q, shotDir);
+        Vector2 pClosest = trajEnd + shotDir * tClosest;
+
+        float diam = GameConstants.BallRadius * 2f;
+
+        // Mask = this ball's full circle at its center.
+        mask.transform.position   = (Vector3)hitCenter;
+        mask.transform.localScale = new Vector3(diam, diam, 1f);
+        mask.enabled = true;
+
+        // Rotation: rotate local +Y (Unity SpriteRenderer's default "up")
+        // to align with shotDir. After Z-rotation θ: local +Y = (−sin θ, cos θ).
+        // Setting equal to shotDir ⇒ θ = atan2(shotDir.y, shotDir.x) − 90°.
+        float angle = Mathf.Atan2(shotDir.y, shotDir.x) * Mathf.Rad2Deg - 90f;
+
+        // localScale:
+        //   x (perpendicular to shot) = diam      full sweep width
+        //   y (along shot)            = diam × 2  overshoots both ends of the
+        //                                         mask circle so the feathered
+        //                                         gradient ends up entirely
+        //                                         outside the ball.
+        overlay.transform.position   = (Vector3)pClosest;
+        overlay.transform.rotation   = Quaternion.Euler(0, 0, angle);
+        overlay.transform.localScale = new Vector3(diam, diam * 2f, 1f);
+
+        // Shadow = ball's own color pulled 28% toward black (= ballColor ×
+        // 0.72). See UpdatePreviewOverlay for why darken-instead-of-mix.
+        Color shadow = Color.Lerp(ball.ballColor, Color.black, 0.28f);
+
+        // Alpha depth ramp: darker near the shooter, lighter near the HUD.
+        // Rationale — balls farther along the flight path feel "farther
+        // away" and the preview should convey reach: a strong shadow on
+        // a near ball reads as "you're going to hit this for sure", a
+        // faint shadow on a far ball reads as "this is a long shot".
+        //
+        // Using world-y distance (ball.y − shooter.y) ÷ play-area height
+        // as the parameter — NOT the trajectory arc length. Reasoning:
+        //   * Almost every shot is mostly vertical, so straight-y
+        //     distance tracks arc length closely in practice.
+        //   * Arc length would need trajPoints arithmetic to get the
+        //     prefix length at each hit ball — possible but extra
+        //     bookkeeping for little perceptual gain.
+        //   * For wall-bounce shots the straight-y approximation
+        //     slightly UNDERSHOOTS the true arc length (a bounced far
+        //     ball still gets a meaningful-but-faded shadow, which is
+        //     the right read).
+        // Range 0.9 → 0.3:
+        //   * 0.9 near shooter  — heavy shadow, unmistakable
+        //   * 0.3 at HUD edge   — still visible tint, but clearly lighter
+        //   * Linear Lerp (not smoothstep) because linear depth feels
+        //     more "physical"; the eye expects brightness to scale
+        //     monotonically with distance.
+        float shooterY   = transform.position.y;
+        float topY       = gm.PlayTopY;
+        float playHeight = Mathf.Max(topY - shooterY, 1e-3f); // guard /0 on degenerate setups
+        float depthT     = Mathf.Clamp01((ball.cachedPos.y - shooterY) / playHeight);
+        shadow.a         = Mathf.Lerp(0.9f, 0.3f, depthT);
+
+        overlay.color   = shadow;
+        overlay.enabled = true;
+    }
+
+    /// <summary>
+    /// Mirror of UpdateProjectile's slide-through detection. Given that the
+    /// projectile has reached <paramref name="firstHit"/> at <paramref name="trajEnd"/>
+    /// moving along <paramref name="shotDir"/>, find a second same-color ball
+    /// (if any) that the projectile would also touch within maxTravel =
+    /// 4/3 BR of continued travel — but ONLY if firstHit and the candidate
+    /// are currently in DIFFERENT connected groups. Matches the real
+    /// physics-time branch in UpdateProjectile exactly, so the preview
+    /// matches what the shot actually does.
+    /// </summary>
+    /// <returns>The slide-through second ball, or null if no slide-through.</returns>
+    Ball FindSlideThroughSecondHit(Ball firstHit, Vector2 trajEnd, Vector2 shotDir, Color projColor)
+    {
+        float hd = GameConstants.HitDetectDist;
+        float hdSq = hd * hd;
+        float maxTravel = GameConstants.BallRadius * 4f / 3f;
+
+        Ball  candidate = null;
+        float bestT = float.MaxValue;
+
+        foreach (var b in gm.Balls)
+        {
+            if (b.id == firstHit.id) continue;
+            // Slide-through requires BOTH balls match projectile color.
+            if (b.ballColor != projColor) continue;
+
+            Vector2 bc = b.cachedPos;
+            Vector2 db = trajEnd - bc;
+            // Ray-circle intersection: |trajEnd + t·shotDir − bc| = hd
+            float bCoeff = 2f * Vector2.Dot(db, shotDir);
+            float cCoeff = db.sqrMagnitude - hdSq;
+            float disc   = bCoeff * bCoeff - 4f * cCoeff;
+            if (disc < 0) continue;
+
+            float t = (-bCoeff - Mathf.Sqrt(disc)) * 0.5f; // entry root
+            if (t < 0) t = 0f;
+            if (t > maxTravel) continue;
+
+            if (t < bestT)
+            {
+                bestT = t;
+                candidate = b;
+            }
+        }
+
+        if (candidate == null) return null;
+
+        // Final gate: firstHit and candidate must be in DIFFERENT groups —
+        // otherwise the projectile would just fatten the existing group,
+        // no slide-through happens, and the second-ball shadow would be a
+        // lie. Uses the non-alloc FindGroup variant to keep the aim frame
+        // GC-clean.
+        gm.FindGroupNonAlloc(firstHit, GameConstants.MatchTouchDist, _previewGroupScratch);
+        for (int i = 0; i < _previewGroupScratch.Count; i++)
+        {
+            if (_previewGroupScratch[i].id == candidate.id) return null;
+        }
+        return candidate;
     }
 
     void ShowAimLine(Vector2 start, Vector2 dir)

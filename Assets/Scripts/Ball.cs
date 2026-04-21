@@ -34,9 +34,6 @@ public class Ball : MonoBehaviour
         float diam = GameConstants.BallRadius * 2f;
         transform.localScale = new Vector3(diam, diam, 1f);
 
-        // Use unlit shader so balls are visible without 2D lighting.
-        // sharedMaterial (not material) so every ball references the same
-        // Material instance — required for 2D SpriteRenderer batching.
         sr.sharedMaterial = GameConstants.GetUnlitSpriteMaterial();
 
         // Sync cached position (transform.position was set by the spawn code BEFORE Init)
@@ -76,6 +73,19 @@ public class Ball : MonoBehaviour
     public float SqrDistTo(Vector2 point)
     {
         return (cachedPos - point).sqrMagnitude;
+    }
+
+    /// <summary>
+    /// Replace the ball's rendered color with an arbitrary value (does NOT
+    /// change <see cref="ballColor"/>). Intended for transient overlays like
+    /// the shooter's aim-beam highlight. Callers are responsible for
+    /// restoring via <see cref="SetBrightnessMultiplier"/>(1) — typically the
+    /// next frame's BH / baseline pass will overwrite this anyway.
+    /// </summary>
+    public void SetColor(Color c)
+    {
+        if (sr == null) sr = GetComponent<SpriteRenderer>();
+        if (sr != null) sr.color = c;
     }
 
     /// <summary>

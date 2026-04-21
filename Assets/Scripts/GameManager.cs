@@ -9,6 +9,12 @@ using System.Collections.Generic;
 ///   LevelManager — level loading, layout validation, win/lose
 /// Retains: ball collection, color queue, field rotation, shooting callback.
 /// </summary>
+// Run Update before Shooter (default 0) so BlackHoleController.UpdateVisuals
+// has already set per-ball colors (pulse or baseline) by the time the
+// shooter's aim-beam highlight runs and overrides for beam-covered balls.
+// Without this, execution order between the two MonoBehaviours isn't
+// guaranteed and BH could wipe Shooter's highlights on alternating frames.
+[DefaultExecutionOrder(-10)]
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
