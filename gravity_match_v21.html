@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Gravity Match v21</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0B0D14;display:flex;flex-direction:column;align-items:center;font-family:-apple-system,sans-serif;color:#fff}
+#top{width:640px;max-width:100vw;padding:6px 16px;display:flex;justify-content:space-between;align-items:center}
+#lvN{font-size:14px;font-weight:600}
+#gc{position:relative;width:640px;max-width:100vw}
+canvas{display:block;width:100%;cursor:crosshair;border-radius:8px}
+#hud{position:absolute;top:0;left:0;right:0;padding:8px 16px;display:flex;justify-content:space-between;pointer-events:none}
+.hb{display:flex;flex-direction:column;align-items:center;min-width:44px}
+.hl{font-size:9px;color:rgba(255,255,255,0.4);font-family:monospace}
+.hv{font-size:14px;font-weight:600}
+#overlay{position:absolute;top:0;left:0;right:0;bottom:0;display:none;align-items:center;justify-content:center;flex-direction:column;border-radius:8px;background:rgba(0,0,0,0.65)}
+#overlay.show{display:flex}
+#overlay h2{font-size:20px;font-weight:600;margin-bottom:4px}
+#overlay p{font-size:12px;color:rgba(255,255,255,0.55);margin-bottom:12px}
+.ob{background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:6px 18px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:3px}
+.ob:hover{background:rgba(255,255,255,0.18)}
+#stD{font-size:24px;letter-spacing:3px;margin-bottom:6px;color:#EF9F27}
+#rw{position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);pointer-events:none;font-size:14px;font-weight:700;opacity:0;transition:opacity .3s;text-shadow:0 2px 6px rgba(0,0,0,0.8)}
+#hint{position:absolute;bottom:6px;left:0;right:0;text-align:center;font-size:9px;color:rgba(255,255,255,0.18);pointer-events:none}
+#lvSel{position:absolute;top:0;left:0;right:0;bottom:0;display:none;align-items:center;justify-content:center;flex-direction:column;border-radius:8px;background:rgba(0,0,0,0.85)}
+#lvSel.show{display:flex}
+.lvG{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+.lvB{width:48px;height:48px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff;font-size:15px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.lvB .ls{font-size:9px;color:#EF9F27;margin-top:1px}
+#anP{width:640px;max-width:100vw;padding:6px 16px;font-size:10px;color:rgba(255,255,255,0.45);line-height:1.5}
+#anP b{color:rgba(255,255,255,0.7)}
+.aG{color:#3fb950}.aW{color:#d29922}.aR{color:#f85149}
+</style></head><body>
+<div id="top">
+<span style="font-size:12px;color:rgba(255,255,255,0.4)">Gravity Match</span>
+<span id="lvN">Level 1</span>
+<button class="ob" style="padding:3px 10px;font-size:10px" onclick="showLS()">Levels</button>
+</div>
+<div id="gc">
+<canvas id="c" width="640" height="480"></canvas>
+<div id="hud">
+<div class="hb"><span class="hl">balls</span><span class="hv" id="hA">0</span></div>
+<div class="hb"><span class="hl">score</span><span class="hv" id="hSc">0</span></div>
+<div class="hb" style="margin-left:auto"><span class="hl">targets</span><span class="hv" id="hR">0</span></div>
+</div>
+<div id="rw"></div>
+<div id="overlay"><div id="stD"></div><h2 id="oT"></h2><p id="oS"></p>
+<div style="display:flex;gap:6px"><button class="ob" onclick="restart()">Retry</button><button class="ob" id="oN" onclick="nextLv()">Next</button></div></div>
+<div id="lvSel"><h2 style="font-size:16px">Select level</h2><div class="lvG" id="lvGr"></div>
+<button class="ob" style="margin-top:10px" onclick="hideLS()">Close</button></div>
+<div id="hint">hold to aim · release to shoot · 3m:100 · 4m:150+cone · 5m:200+cone · combo:+300 · leftover:+200/ball</div>
+</div>
+<div id="anP"></div>
+
+<script>
+var cv=document.getElementById('c'),cx=cv.getContext('2d');
+var W=640,H=480,BX=W/2,BY=H/2-20;
+var BR=11,BH_R0=20,BH_EHR0=34;
+var bhR,bhEhr,bhAte=0; // dynamic BH size, grows as balls absorbed
+var SX=W/2,SY=H-36;
+var BSPD=4.5,TD=BR*2.3,STRICT_TD=BR*1.6,MATCH_TD=BR*2.05;
+var OVERLAP_D=BR*1.75;
+var ROT=Math.PI/6,C4=30*Math.PI/180,C5=30*Math.PI/180;
+var PAL=['#E24B4A','#378ADD','#1D9E75','#EF9F27'];
+var WALL_L=16,WALL_R=W-16,WALL_T=16,WALL_B=H-56;
+var MAX_BOUNCES=5;
+var TRAJ_LEN=250; // max trajectory dots shown
+
+var state,balls,proj,suckFx,coneFx,spawnFx,stBg=[];
+var mx=W/2,my=H/2,nId;
+var cLv,bLeft,shots,score,fAngle,rotTgt,isRot;
+var lvSt=[0,0,0,0,0];
+var curCol,nxtCol,rwT=0;
+var pendingMatch=null;
+var comboCount=0; // consecutive matches
+var aiming=false; // true when mouse is held down
+
+for(var i=0;i<60;i++)stBg.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1+0.2,a:Math.random()*0.3+0.1,tw:Math.random()*Math.PI*2});
+
+// ===== LEVELS =====
+var OD=BR*1.75;
+function tOff(d){return OD/d;}
+var LEVELS=[
+{
+  name:"First Steps",tip:"2 colors, 1 four-match bonus. Learn to shoot!",
+  budget:14,colors:['#E24B4A','#378ADD'],
+  blobs:[
+    {a:4.7,d:75,balls:[{da:-tOff(75)/2,dd:0,c:'#E24B4A'},{da:tOff(75)/2,dd:0,c:'#E24B4A'}]},
+    {a:3.3,d:80,balls:[{da:-tOff(80)/2,dd:0,c:'#378ADD'},{da:tOff(80)/2,dd:0,c:'#378ADD'}]},
+    {a:1.8,d:75,balls:[{da:-tOff(75)/2,dd:0,c:'#E24B4A'},{da:tOff(75)/2,dd:0,c:'#E24B4A'}]},
+    {a:0.5,d:80,balls:[{da:-tOff(80)/2,dd:0,c:'#378ADD'},{da:tOff(80)/2,dd:0,c:'#378ADD'}]},
+    {a:5.5,d:58,balls:[{da:-tOff(58)/2,dd:0,c:'#E24B4A'},{da:tOff(58)/2,dd:0,c:'#E24B4A'},
+      {da:tOff(58)*2.06,dd:0,c:'#E24B4A'}]},
+    {a:2.8,d:55,balls:[{da:0,dd:0,c:'#378ADD'}]},
+  ],s3:2500,s2:1500
+},
+{
+  name:"Orbit",tip:"3 colors, 4 lonely balls. Combo is your lifeline!",
+  budget:16,colors:['#E24B4A','#378ADD','#1D9E75'],
+  blobs:[
+    {a:5.0,d:78,balls:[{da:-tOff(78)/2,dd:0,c:'#E24B4A'},{da:tOff(78)/2,dd:0,c:'#E24B4A'}]},
+    {a:3.5,d:82,balls:[{da:-tOff(82)/2,dd:0,c:'#378ADD'},{da:tOff(82)/2,dd:0,c:'#378ADD'}]},
+    {a:2.0,d:78,balls:[{da:-tOff(78)/2,dd:0,c:'#1D9E75'},{da:tOff(78)/2,dd:0,c:'#1D9E75'}]},
+    {a:0.5,d:82,balls:[{da:-tOff(82)/2,dd:0,c:'#E24B4A'},{da:tOff(82)/2,dd:0,c:'#E24B4A'}]},
+    {a:4.3,d:55,balls:[{da:-tOff(55)/2,dd:0,c:'#378ADD'},{da:tOff(55)/2,dd:0,c:'#378ADD'}]},
+    {a:5.5,d:105,balls:[{da:0,dd:0,c:'#1D9E75'}]},
+    {a:3.0,d:108,balls:[{da:0,dd:0,c:'#E24B4A'}]},
+    {a:1.3,d:55,balls:[{da:0,dd:0,c:'#378ADD'}]},
+    {a:0.0,d:105,balls:[{da:0,dd:0,c:'#1D9E75'}]},
+  ],s3:2400,s2:1800
+},
+{
+  name:"Debris Field",tip:"6 singles + 1 four-match. Budget razor-thin!",
+  budget:18,colors:['#E24B4A','#378ADD','#1D9E75'],
+  blobs:[
+    {a:5.0,d:82,balls:[{da:-tOff(82)/2,dd:0,c:'#E24B4A'},{da:tOff(82)/2,dd:0,c:'#E24B4A'},
+      {da:tOff(82)*2.06,dd:0,c:'#E24B4A'}]},
+    {a:3.2,d:85,balls:[{da:-tOff(85)/2,dd:0,c:'#378ADD'},{da:tOff(85)/2,dd:0,c:'#378ADD'}]},
+    {a:1.5,d:82,balls:[{da:-tOff(82)/2,dd:0,c:'#1D9E75'},{da:tOff(82)/2,dd:0,c:'#1D9E75'}]},
+    {a:0.2,d:85,balls:[{da:-tOff(85)/2,dd:0,c:'#E24B4A'},{da:tOff(85)/2,dd:0,c:'#E24B4A'}]},
+    {a:2.3,d:50,balls:[{da:-tOff(50)/2,dd:0,c:'#1D9E75'},{da:tOff(50)/2,dd:0,c:'#1D9E75'}]},
+    {a:5.5,d:50,balls:[{da:0,dd:0,c:'#378ADD'}]},
+    {a:0.8,d:108,balls:[{da:0,dd:0,c:'#1D9E75'}]},
+    {a:3.8,d:55,balls:[{da:0,dd:0,c:'#E24B4A'}]},
+    {a:1.0,d:50,balls:[{da:0,dd:0,c:'#378ADD'}]},
+    {a:4.5,d:110,balls:[{da:0,dd:0,c:'#1D9E75'}]},
+    {a:2.8,d:108,balls:[{da:0,dd:0,c:'#E24B4A'}]},
+  ],s3:3000,s2:2200
+},
+{
+  name:"Asteroid Belt",tip:"4 colors, NO cones, 8 singles. Pure skill + combos!",
+  budget:22,colors:['#E24B4A','#378ADD','#1D9E75','#EF9F27'],
+  blobs:[
+    {a:5.0,d:80,balls:[{da:-tOff(80)/2,dd:0,c:'#E24B4A'},{da:tOff(80)/2,dd:0,c:'#E24B4A'}]},
+    {a:3.2,d:85,balls:[{da:-tOff(85)/2,dd:0,c:'#378ADD'},{da:tOff(85)/2,dd:0,c:'#378ADD'}]},
+    {a:1.5,d:80,balls:[{da:-tOff(80)/2,dd:0,c:'#1D9E75'},{da:tOff(80)/2,dd:0,c:'#1D9E75'}]},
+    {a:0.2,d:85,balls:[{da:-tOff(85)/2,dd:0,c:'#EF9F27'},{da:tOff(85)/2,dd:0,c:'#EF9F27'}]},
+    {a:4.0,d:55,balls:[{da:-tOff(55)/2,dd:0,c:'#E24B4A'},{da:tOff(55)/2,dd:0,c:'#E24B4A'}]},
+    {a:5.5,d:50,balls:[{da:0,dd:0,c:'#378ADD'}]},
+    {a:0.8,d:108,balls:[{da:0,dd:0,c:'#1D9E75'}]},
+    {a:3.8,d:55,balls:[{da:0,dd:0,c:'#EF9F27'}]},
+    {a:1.0,d:50,balls:[{da:0,dd:0,c:'#E24B4A'}]},
+    {a:4.5,d:110,balls:[{da:0,dd:0,c:'#1D9E75'}]},
+    {a:2.8,d:108,balls:[{da:0,dd:0,c:'#EF9F27'}]},
+    {a:2.0,d:50,balls:[{da:0,dd:0,c:'#378ADD'}]},
+    {a:5.8,d:105,balls:[{da:0,dd:0,c:'#1D9E75'}]},
+  ],s3:3500,s2:2500
+},
+{
+  name:"Event Horizon",tip:"26 balls, 10 singles, 4 colors. Bridge the 5-match or perish!",
+  budget:28,colors:['#E24B4A','#378ADD','#1D9E75','#EF9F27'],
+  blobs:[
+    {a:5.0,d:100,balls:[
+      {da:-tOff(100)*1.78,dd:0,c:'#E24B4A'},{da:-tOff(100)*0.78,dd:0,c:'#E24B4A'},
+      {da:tOff(100)*0.78,dd:0,c:'#E24B4A'},{da:tOff(100)*1.78,dd:0,c:'#E24B4A'}]},
+    {a:3.0,d:82,balls:[{da:-tOff(82)/2,dd:0,c:'#378ADD'},{da:tOff(82)/2,dd:0,c:'#378ADD'}]},
+    {a:1.2,d:85,balls:[{da:-tOff(85)/2,dd:0,c:'#1D9E75'},{da:tOff(85)/2,dd:0,c:'#1D9E75'}]},
+    {a:0.0,d:82,balls:[{da:-tOff(82)/2,dd:0,c:'#EF9F27'},{da:tOff(82)/2,dd:0,c:'#EF9F27'}]},
+    {a:4.0,d:60,balls:[{da:-tOff(60)/2,dd:0,c:'#378ADD'},{da:tOff(60)/2,dd:0,c:'#378ADD'}]},
+    {a:2.0,d:55,balls:[{da:-tOff(55)/2,dd:0,c:'#1D9E75'},{da:tOff(55)/2,dd:0,c:'#1D9E75'}]},
+    {a:1.5,d:110,balls:[{da:-tOff(110)/2,dd:0,c:'#EF9F27'},{da:tOff(110)/2,dd:0,c:'#EF9F27'}]},
+    {a:5.5,d:55,balls:[{da:0,dd:0,c:'#378ADD'}]},
+    {a:3.8,d:50,balls:[{da:0,dd:0,c:'#1D9E75'}]},
+    {a:0.8,d:50,balls:[{da:0,dd:0,c:'#EF9F27'}]},
+    {a:2.5,d:115,balls:[{da:0,dd:0,c:'#E24B4A'}]},
+    {a:4.5,d:115,balls:[{da:0,dd:0,c:'#1D9E75'}]},
+    {a:1.8,d:50,balls:[{da:0,dd:0,c:'#378ADD'}]},
+    {a:0.5,d:108,balls:[{da:0,dd:0,c:'#EF9F27'}]},
+    {a:3.5,d:112,balls:[{da:0,dd:0,c:'#E24B4A'}]},
+    {a:5.2,d:50,balls:[{da:0,dd:0,c:'#1D9E75'}]},
+    {a:4.8,d:55,balls:[{da:0,dd:0,c:'#EF9F27'}]},
+  ],s3:5000,s2:3500
+}
+];
+
+// ===== CORE =====
+function addBall(x,y,c){var b={id:nId++,x:x,y:y,c:c};balls.push(b);return b;}
+function dist(a,b){return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2);}
+function getTouching(b,md){var d=md||TD;return balls.filter(function(o){return o.id!==b.id&&dist(b,o)<=d;});}
+function findGroup(b,md){
+  var col=b.c,vis=new Set([b.id]),q=[b],g=[b];
+  while(q.length){var cur=q.shift();for(var t of getTouching(cur,md))
+    if(!vis.has(t.id)&&t.c===col){vis.add(t.id);q.push(t);g.push(t);}}
+  return g;
+}
+// Get colors that have a connected group of ≥2 same-color balls (touching)
+function getPairColors(){
+  var visited=new Set(),paired={};
+  for(var b of balls){
+    if(visited.has(b.id))continue;
+    var grp=findGroup(b,MATCH_TD);
+    for(var g of grp) visited.add(g.id);
+    if(grp.length>=2) paired[b.c]=true;
+  }
+  return Object.keys(paired);
+}
+function pickNext(){
+  if(balls.length===0) return LEVELS[cLv].colors[0];
+  var pc=getPairColors();
+  if(pc.length===0){
+    // All singletons - pick any on-field color
+    var onF={};for(var b of balls)onF[b.c]=true;
+    pc=Object.keys(onF);
+  }
+  if(pc.length===0) return LEVELS[cLv].colors[0];
+  if(pc.length===1) return pc[0];
+  // Weighted random: favor colors with more paired balls
+  var ws=[];
+  for(var c of pc){var w=0;
+    for(var b of balls){if(b.c!==c)continue;
+      var hasPair=getTouching(b,MATCH_TD).some(function(t){return t.c===c;});
+      w+=hasPair?4:1;}
+    ws.push({c:c,w:Math.max(w,1)});}
+  var tot=ws.reduce(function(s,x){return s+x.w;},0),r=Math.random()*tot,acc=0;
+  for(var x of ws){acc+=x.w;if(r<=acc)return x.c;}
+  return pc[0];
+}
+function showRw(t,c){document.getElementById('rw').textContent=t;
+  document.getElementById('rw').style.color=c;document.getElementById('rw').style.opacity='1';rwT=80;}
+
+// ===== FX =====
+function suckBall(b){suckFx.push({x:b.x,y:b.y,c:b.c,t:0,mt:26});}
+function updateSuck(){for(var i=suckFx.length-1;i>=0;i--){var s=suckFx[i];s.t++;
+  s.x+=(BX-s.x)*0.15;s.y+=(BY-s.y)*0.15;if(s.t>=s.mt)suckFx.splice(i,1);}}
+function removeBalls(list){
+  var ids=new Set(list.map(function(b){return b.id;}));
+  for(var b of list)suckBall(b);
+  balls=balls.filter(function(b){return!ids.has(b.id);});
+  // BH grows with each absorbed ball
+  bhAte+=list.length;
+  bhR=BH_R0+bhAte*0.4;
+  bhEhr=BH_EHR0+bhAte*0.6;
+}
+
+// Auto-absorb: field balls too close to growing BH get sucked in
+function bhAutoAbsorb(){
+  if(state!=='play'||pendingMatch||isRot||proj)return;
+  // Find balls inside event horizon
+  var absIds=new Set();
+  for(var b of balls){
+    if(dist(b,{x:BX,y:BY})<bhEhr+BR*0.5) absIds.add(b.id);
+  }
+  if(absIds.size===0)return;
+  // Expand: touching neighbors also get pulled in (only if close to BH)
+  var pullRange=bhEhr+BR*2.5;
+  for(var b of balls){if(absIds.has(b.id))continue;
+    if(dist(b,{x:BX,y:BY})>pullRange)continue;
+    for(var nb of getTouching(b)){
+      if(absIds.has(nb.id)){absIds.add(b.id);break;}}}
+  var absorbed=balls.filter(function(b){return absIds.has(b.id);});
+  for(var b of absorbed)suckBall(b);
+  balls=balls.filter(function(b){return!absIds.has(b.id);});
+  bhAte+=absorbed.length;
+  bhR=BH_R0+bhAte*0.4;bhEhr=BH_EHR0+bhAte*0.6;
+  score+=absorbed.length*50;
+  updateHud();forceValidColors();checkEnd();
+}
+
+// ===== ROTATION =====
+function startRot(){rotTgt=fAngle+ROT;isRot=true;}
+function updateRot(){
+  if(!isRot)return;
+  var diff=rotTgt-fAngle;
+  if(Math.abs(diff)<0.003){fAngle=rotTgt;isRot=false;forceValidColors();updateHud();checkEnd();}
+  else{var step=diff*0.1;fAngle+=step;
+    for(var b of balls){var dx=b.x-BX,dy=b.y-BY,a=Math.atan2(dy,dx)+step,d=Math.sqrt(dx*dx+dy*dy);
+      b.x=BX+d*Math.cos(a);b.y=BY+d*Math.sin(a);}
+    // Validate colors during rotation too (field positions change)
+    forceValidColors();
+  }}
+
+// ===== TRAJECTORY (straight line + bounce, BH absorbs on contact) =====
+function getTraj(sx,sy,vx,vy){
+  var pts=[],x=sx,y=sy,bx=vx,by=vy,bounces=0;
+  for(var i=0;i<400;i++){
+    x+=bx*0.5;y+=by*0.5;
+    if(x-BR<=WALL_L){x=WALL_L+BR;bx=-bx;bounces++;}
+    if(x+BR>=WALL_R){x=WALL_R-BR;bx=-bx;bounces++;}
+    if(y-BR<=WALL_T){y=WALL_T+BR;by=-by;bounces++;}
+    if(bounces>MAX_BOUNCES||y>SY+10)break;
+    if(dist({x:x,y:y},{x:BX,y:BY})<bhEhr)break;
+    var hit=false;for(var b of balls)if(dist({x:x,y:y},b)<BR*1.7){hit=true;break;}
+    if(hit)break;
+    pts.push({x:x,y:y});
+  }
+  return pts;
+}
+
+// ===== FIRE =====
+function fire(){
+  if(proj||pendingMatch||state!=='play'||isRot||bLeft<=0)return;
+  var dx=mx-SX,dy=my-SY,d=Math.sqrt(dx*dx+dy*dy);
+  if(d<1||dy>-5)return;
+  // Final safety: force valid right before shoot
+  forceValidColors();
+  proj={x:SX,y:SY,vx:dx/d*BSPD,vy:dy/d*BSPD,c:curCol,bounces:0,trail:[]};
+  bLeft--;shots++;document.getElementById('hA').textContent=bLeft;
+  curCol=nxtCol;
+  nxtCol=pickNext();
+  forceValidColors();
+}
+
+function upProj(){
+  if(!proj)return;
+  // 3 full-speed movement steps per frame for good speed
+  for(var fStep=0;fStep<3;fStep++){
+    if(!proj)return;
+    var minD=Infinity;
+    for(var b of balls){var d2=dist(proj,b);if(d2<minD)minD=d2;}
+    // Sub-step when near balls to prevent tunneling
+    var sub=minD<BR*3?6:minD<BR*6?3:1;
+    var svx=proj.vx/sub,svy=proj.vy/sub;
+    for(var step=0;step<sub;step++){
+      proj.x+=svx;proj.y+=svy;
+      proj.trail.push({x:proj.x,y:proj.y});if(proj.trail.length>60)proj.trail.shift();
+      if(proj.x-BR<=WALL_L){proj.x=WALL_L+BR;proj.vx=-proj.vx;svx=-svx;proj.bounces++;}
+      if(proj.x+BR>=WALL_R){proj.x=WALL_R-BR;proj.vx=-proj.vx;svx=-svx;proj.bounces++;}
+      if(proj.y-BR<=WALL_T){proj.y=WALL_T+BR;proj.vy=-proj.vy;svy=-svy;proj.bounces++;}
+      if(proj.bounces>MAX_BOUNCES||proj.y>SY+20){proj=null;comboCount=0;startRot();return;}
+      if(dist(proj,{x:BX,y:BY})<bhEhr){
+        suckFx.push({x:proj.x,y:proj.y,c:proj.c,t:0,mt:20});
+        bhAte++;bhR=BH_R0+bhAte*0.4;bhEhr=BH_EHR0+bhAte*0.6;
+        proj=null;comboCount=0;startRot();return;}
+      var hitB=null,hitD=Infinity;
+      for(var b of balls){var d2=dist(proj,b);if(d2<BR*1.7&&d2<hitD){hitD=d2;hitB=b;}}
+      if(hitB){
+        var dx=proj.x-hitB.x,dy=proj.y-hitB.y,dl=Math.sqrt(dx*dx+dy*dy)||1;
+        var nx=hitB.x+dx/dl*OVERLAP_D,ny=hitB.y+dy/dl*OVERLAP_D;
+        for(var it=0;it<30;it++){var pushed=false;
+          for(var b2 of balls){if(b2.id===hitB.id)continue;var d2=dist({x:nx,y:ny},b2);
+            if(d2<OVERLAP_D-0.5){var px=nx-b2.x,py=ny-b2.y,pl=Math.sqrt(px*px+py*py)||1;
+              nx+=px/pl*(OVERLAP_D-d2+0.2);ny+=py/pl*(OVERLAP_D-d2+0.2);pushed=true;}}
+          if(!pushed)break;}
+        nx=Math.max(WALL_L+BR,Math.min(WALL_R-BR,nx));
+        ny=Math.max(WALL_T+BR,Math.min(WALL_B,ny));
+        var nb=addBall(nx,ny,proj.c);proj=null;
+        var grp=findGroup(nb,MATCH_TD);
+        if(grp.length>=3){
+          var allTargets=grp.slice();
+          var coneExtra=[];
+          var cInfo=null;
+          if(grp.length>=4){
+            var mcx=0,mcy=0;for(var g of grp){mcx+=g.x;mcy+=g.y;}mcx/=grp.length;mcy/=grp.length;
+            var ba=Math.atan2(mcy-BY,mcx-BX);
+            var coneA=grp.length>=5?C5:C4;
+            var colorOnly=grp.length<5;
+            var matchIds=new Set(grp.map(function(b){return b.id;}));
+            var hit=new Set();
+            for(var i=0;i<balls.length;i++){
+              var b=balls[i];if(matchIds.has(b.id))continue;
+              if(colorOnly&&b.c!==nb.c)continue;
+              var a=Math.atan2(b.y-BY,b.x-BX);
+              var da=a-ba;while(da>Math.PI)da-=2*Math.PI;while(da<-Math.PI)da+=2*Math.PI;
+              var bd=dist(b,{x:BX,y:BY});if(bd<BR)continue;
+              var halfW=Math.asin(Math.min(1,BR/bd));
+              if(Math.abs(da)-halfW<=coneA)hit.add(b.id);
+            }
+            var spread=true;while(spread){spread=false;
+              for(var b of balls){if(hit.has(b.id)||matchIds.has(b.id))continue;
+                for(var nb2 of getTouching(b)){if(hit.has(nb2.id)){hit.add(b.id);spread=true;break;}}}}
+            coneExtra=balls.filter(function(b){return hit.has(b.id);});
+            for(var ce of coneExtra)allTargets.push(ce);
+            var fxCol=grp.length>=5?'rgba(255,255,255,0.6)':nb.c;
+            cInfo={ox:BX,oy:BY,a1:ba-coneA,a2:ba+coneA,col:fxCol};
+          }
+          pendingMatch={phase:'highlight',targets:allTargets,matchGrp:grp,coneExtra:coneExtra,
+            col:nb.c,matchCount:grp.length,timer:22,coneFx:cInfo,coneFxShown:false};
+          // Combo only counts if there are singletons on field (after this match resolves)
+        } else {comboCount=0;startRot();}
+        return;
+      }
+    }
+  }
+}
+
+function updatePending(){
+  if(!pendingMatch)return;
+  var pm=pendingMatch;
+  pm.timer--;
+
+  if(pm.phase==='highlight'){
+    // Phase 1: highlight all targets (match + cone) with pulse
+    // Show cone FX at the start of highlight
+    if(pm.coneFx&&!pm.coneFxShown){
+      pm.coneFxShown=true;
+      coneFx.push(Object.assign({t:0,mt:55},pm.coneFx));
+      if(pm.matchCount>=5) showRw('5+ MATCH! Mega cone!','#EF9F27');
+      else showRw('4 MATCH! Color cone!',pm.col);
+    }
+    if(pm.timer<=0){
+      // Remove all targets at once
+      var valid=pm.targets.filter(function(b){return balls.indexOf(b)!==-1;});
+      // Scoring: 3-match=100/ball, 4-match=150/ball, 5-match=200/ball
+      var pts=pm.matchCount>=5?200:pm.matchCount===4?150:100;
+      score+=valid.length*pts;
+      removeBalls(valid);updateHud();
+      pm.phase='suck';pm.timer=32; // wait for suction animation
+    }
+  } else if(pm.phase==='suck'){
+    if(pm.timer<=0){
+      // Check if singletons exist (balls with no same-color touching neighbor)
+      var hasSingle=false;
+      for(var b of balls){
+        var hasN=getTouching(b,MATCH_TD).some(function(t){return t.c===b.c;});
+        if(!hasN){hasSingle=true;break;}
+      }
+      if(hasSingle){
+        comboCount++;
+        if(comboCount>=3){
+          comboBonus();
+          comboCount=0;
+          pm.phase='buddy';pm.timer=50; // wait for buddy FX to play
+          return;
+        }
+      } else {
+        comboCount=0;
+      }
+      pendingMatch=null;forceValidColors();startRot();
+    }
+  } else if(pm.phase==='buddy'){
+    // Wait for buddy spawn FX to finish, then rotate
+    if(pm.timer<=0){
+      pendingMatch=null;forceValidColors();startRot();
+    }
+  }
+}
+
+// Combo bonus: find a lonely ball (no same-color neighbor) and attach a same-color buddy
+function comboBonus(){
+  // Find singletons: balls with no same-color touching neighbor
+  var singles=[];
+  for(var b of balls){
+    var hasMatch=getTouching(b,MATCH_TD).some(function(t){return t.c===b.c;});
+    if(!hasMatch) singles.push(b);
+  }
+  if(singles.length===0)return;
+  var target=singles[Math.floor(Math.random()*singles.length)];
+  // Find best position: try several angles around the target
+  var bestX=target.x+OVERLAP_D,bestY=target.y;
+  var bestScore=-1;
+  for(var ai=0;ai<12;ai++){
+    var ang=ai*Math.PI*2/12;
+    var tx=target.x+Math.cos(ang)*OVERLAP_D;
+    var ty=target.y+Math.sin(ang)*OVERLAP_D;
+    // Must be in bounds
+    if(tx<WALL_L+BR||tx>WALL_R-BR||ty<WALL_T+BR||ty>WALL_B)continue;
+    // Must not overlap BH
+    if(dist({x:tx,y:ty},{x:BX,y:BY})<bhEhr+BR)continue;
+    // Must not overlap other balls
+    var ok=true;
+    for(var b2 of balls){if(b2.id===target.id)continue;
+      if(dist({x:tx,y:ty},b2)<OVERLAP_D-1){ok=false;break;}}
+    if(!ok)continue;
+    // Prefer positions further from BH (safer)
+    var sc=dist({x:tx,y:ty},{x:BX,y:BY});
+    if(sc>bestScore){bestScore=sc;bestX=tx;bestY=ty;}
+  }
+  if(bestScore>0){
+    var nb=addBall(bestX,bestY,target.c);
+    // Long visible spawn FX: expanding ring + persistent marker on the buddy pair
+    spawnFx.push({x:bestX,y:bestY,c:target.c,t:0,mt:60,type:'ring'});
+    spawnFx.push({x:target.x,y:target.y,c:target.c,t:0,mt:60,type:'ring'});
+    // Arrow line from target to buddy
+    spawnFx.push({x1:target.x,y1:target.y,x2:bestX,y2:bestY,c:'#FFE66D',t:0,mt:80,type:'line'});
+    // Persistent glow on both balls
+    spawnFx.push({x:bestX,y:bestY,c:'#FFE66D',t:0,mt:90,type:'glow'});
+    spawnFx.push({x:target.x,y:target.y,c:'#FFE66D',t:0,mt:90,type:'glow'});
+    showRw('3× COMBO! +300','#FFE66D');
+    score+=300;updateHud();
+  }
+}
+
+// Force valid colors - called every frame
+function forceValidColors(){
+  if(balls.length===0||state!=='play')return;
+  var pc=getPairColors();
+  if(pc.length===0){
+    var onF={};for(var b of balls)onF[b.c]=true;
+    pc=Object.keys(onF);
+  }
+  if(pc.length===0)return;
+  if(pc.indexOf(curCol)===-1) curCol=pc[Math.floor(Math.random()*pc.length)];
+  if(pc.indexOf(nxtCol)===-1) nxtCol=pc[Math.floor(Math.random()*pc.length)];
+}
+
+// ===== HUD =====
+function updateHud(){
+  document.getElementById('hSc').textContent=score;
+  document.getElementById('hA').textContent=bLeft;
+  document.getElementById('hR').textContent=balls.length;
+}
+function checkEnd(){
+  if(state!=='play')return;updateHud();
+  if(balls.length===0){
+    state='won';var lv=LEVELS[cLv];
+    // Remaining ball bonus: 200 pts each
+    var remBonus=bLeft*200;
+    score+=remBonus;
+    // Stars based on total score
+    var s=score>=lv.s3?3:score>=lv.s2?2:1;
+    lvSt[cLv]=Math.max(lvSt[cLv],s);
+    document.getElementById('stD').textContent='\u2605'.repeat(s)+'\u2606'.repeat(3-s);
+    document.getElementById('oT').textContent='All clear!';
+    document.getElementById('oS').textContent=score+' pts (bonus: '+bLeft+'\u00d7200)';
+    document.getElementById('oN').style.display=cLv<LEVELS.length-1?'inline-block':'none';
+    document.getElementById('overlay').classList.add('show');
+  }else if(bLeft<=0&&!proj&&!isRot&&!pendingMatch){
+    state='lose';document.getElementById('stD').textContent='';
+    document.getElementById('oT').textContent='Out of balls';
+    document.getElementById('oS').textContent=balls.length+' balls left';
+    document.getElementById('oN').style.display='none';
+    document.getElementById('overlay').classList.add('show');
+  }
+}
+
+// ===== LEVEL =====
+function loadLv(idx){
+  cLv=idx;var lv=LEVELS[idx];
+  balls=[];nId=0;suckFx=[];coneFx=[];spawnFx=[];proj=null;shots=0;score=0;
+  state='play';fAngle=0;rotTgt=0;isRot=false;pendingMatch=null;bLeft=lv.budget;comboCount=0;
+  bhR=BH_R0;bhEhr=BH_EHR0;bhAte=0;
+  for(var blob of lv.blobs)for(var bd of blob.balls){
+    var a=blob.a+bd.da,d=blob.d+bd.dd;
+    addBall(BX+d*Math.cos(a),BY+d*Math.sin(a),bd.c);
+  }
+  // Prevent 3+ same-color groups
+  for(var v=0;v<50;v++){var f=false;
+    for(var b of balls){var g=findGroup(b,STRICT_TD);
+      if(g.length>=3){var oc=lv.colors.filter(function(c){return c!==b.c;});
+        b.c=oc[Math.floor(Math.random()*oc.length)];f=true;break;}}
+    if(!f)break;}
+  // Push apart different-color balls that visually overlap
+  // First, identify which balls are part of same-color pairs
+  var MIN_VIS=BR*3; // 33px
+  var pairSet=new Set();
+  var vis0=new Set();
+  for(var b of balls){
+    if(vis0.has(b.id))continue;
+    var grp=findGroup(b,MATCH_TD);
+    for(var g of grp)vis0.add(g.id);
+    if(grp.length>=2) for(var g of grp)pairSet.add(g.id);
+  }
+  for(var iter=0;iter<150;iter++){
+    var pushed=false;
+    for(var i=0;i<balls.length;i++){
+      for(var j=i+1;j<balls.length;j++){
+        var bi=balls[i],bj=balls[j];
+        if(bi.c===bj.c)continue;
+        var d2=dist(bi,bj);
+        if(d2<MIN_VIS&&d2>0.1){
+          var dx=(bj.x-bi.x)/d2,dy=(bj.y-bi.y)/d2;
+          var push=MIN_VIS-d2+1;
+          // Only move the ball that is NOT in a pair; if both are pairs or both singles, move both
+          var iP=pairSet.has(bi.id),jP=pairSet.has(bj.id);
+          if(iP&&!jP){
+            // Only move bj
+            bj.x+=dx*push;bj.y+=dy*push;
+          } else if(!iP&&jP){
+            // Only move bi
+            bi.x-=dx*push;bi.y-=dy*push;
+          } else {
+            // Move both equally
+            bi.x-=dx*push*0.5;bi.y-=dy*push*0.5;
+            bj.x+=dx*push*0.5;bj.y+=dy*push*0.5;
+          }
+          // Keep in bounds and away from BH
+          for(var bb of [bi,bj]){
+            bb.x=Math.max(WALL_L+BR,Math.min(WALL_R-BR,bb.x));
+            bb.y=Math.max(WALL_T+BR,Math.min(WALL_B,bb.y));
+            var bd=dist(bb,{x:BX,y:BY});
+            if(bd<bhEhr+BR+2){
+              var da=Math.atan2(bb.y-BY,bb.x-BX);
+              bb.x=BX+Math.cos(da)*(bhEhr+BR+3);
+              bb.y=BY+Math.sin(da)*(bhEhr+BR+3);
+            }
+          }
+          pushed=true;
+        }
+      }
+    }
+    if(!pushed)break;
+  }
+  curCol=pickNext();nxtCol=pickNext();updateHud();
+  document.getElementById('lvN').textContent='Lv '+(idx+1)+': '+lv.name;
+  document.getElementById('overlay').classList.remove('show');hideLS();
+  analyzeLevel();
+}
+function restart(){loadLv(cLv);}
+function nextLv(){if(cLv<LEVELS.length-1)loadLv(cLv+1);}
+function showLS(){var g=document.getElementById('lvGr');g.innerHTML='';
+  for(var i=0;i<LEVELS.length;i++){var b=document.createElement('button');b.className='lvB';
+    b.innerHTML=(i+1)+'<span class="ls">'+(lvSt[i]>0?'\u2605'.repeat(lvSt[i]):'\u2014')+'</span>';
+    b.onclick=(function(j){return function(){loadLv(j);};})(i);g.appendChild(b);}
+  document.getElementById('lvSel').classList.add('show');}
+function hideLS(){document.getElementById('lvSel').classList.remove('show');}
+
+// ===== SIMPLE ANALYZER =====
+function analyzeLevel(){
+  var lv=LEVELS[cLv],totalB=0,rawShots=0;
+  var colCnt={},pairs=0,fours=0,fives=0,singles=0,mixed=0;
+  for(var blob of lv.blobs){
+    var bc={};for(var bd of blob.balls){bc[bd.c]=(bc[bd.c]||0)+1;totalB++;colCnt[bd.c]=(colCnt[bd.c]||0)+1;}
+    var ck=Object.keys(bc);
+    if(ck.length===1){var n=bc[ck[0]];if(n===4)fives++;else if(n===3)fours++;else if(n===2)pairs++;else singles++;}
+    else mixed++;
+    for(var c in bc)rawShots+=bc[c]>=2?1:2;
+  }
+  var ratio=(lv.budget/Math.max(1,rawShots)),rc,diff;
+  if(ratio>=2.0){rc='aG';diff='Easy';}
+  else if(ratio>=1.3){rc='aW';diff='Medium';}
+  else if(ratio>=0.9){rc='aR';diff='Hard';}
+  else{rc='aR';diff='Expert';}
+  var cs='';for(var c in colCnt)cs+='<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:'+c+';margin:0 2px;vertical-align:middle"></span>'+colCnt[c]+' ';
+  var h=totalB+'b · '+cs+'· raw='+rawShots+' · bud='+lv.budget+' · <b class="'+rc+'">'+ratio.toFixed(1)+'× '+diff+'</b>';
+  h+=' · P:'+pairs+' 4m:'+fours+' 5m:'+fives+' S:'+singles;
+  h+=' · ★★★≥'+lv.s3+'pts ★★≥'+lv.s2+'pts';
+  document.getElementById('anP').innerHTML=h;
+}
+
+// ===== DRAWING =====
+function draw(){
+  cx.clearRect(0,0,W,H);cx.fillStyle='#0B0D14';cx.fillRect(0,0,W,H);
+  for(var s of stBg){s.tw+=0.005;cx.globalAlpha=s.a*(0.7+0.3*Math.sin(s.tw));
+    cx.fillStyle='#fff';cx.beginPath();cx.arc(s.x,s.y,s.r,0,Math.PI*2);cx.fill();}
+  cx.globalAlpha=1;
+  // Walls
+  cx.strokeStyle='rgba(255,255,255,0.05)';cx.lineWidth=1;
+  cx.strokeRect(WALL_L,WALL_T,WALL_R-WALL_L,WALL_B-WALL_T);
+  // Cone FX
+  for(var i=coneFx.length-1;i>=0;i--){var cf=coneFx[i];cf.t++;
+    var p=1-cf.t/cf.mt;
+    var ox=cf.ox||BX,oy=cf.oy||BY;
+    var coneR=Math.max(W,H);
+    // Flashlight gradient: bright at BH, fading outward
+    var grd=cx.createRadialGradient(ox,oy,bhR,ox,oy,coneR);
+    grd.addColorStop(0,'rgba(255,255,255,'+(p*0.35)+')');
+    grd.addColorStop(0.3,'rgba(255,255,255,'+(p*0.15)+')');
+    grd.addColorStop(1,'rgba(255,255,255,0)');
+    cx.fillStyle=grd;
+    cx.beginPath();cx.moveTo(ox,oy);cx.arc(ox,oy,coneR,cf.a1,cf.a2);cx.closePath();cx.fill();
+    if(cf.t>=cf.mt)coneFx.splice(i,1);}
+  // BH (grows as it absorbs balls)
+  var bhGlow=Math.min(1,bhAte/20); // 0→1 as it eats more
+  // Outer glow (grows with absorption)
+  if(bhGlow>0.05){
+    var glowR=bhEhr+15+bhGlow*25;
+    var grd2=cx.createRadialGradient(BX,BY,bhR,BX,BY,glowR);
+    grd2.addColorStop(0,'rgba(127,90,221,'+(bhGlow*0.15)+')');
+    grd2.addColorStop(1,'rgba(127,90,221,0)');
+    cx.fillStyle=grd2;cx.beginPath();cx.arc(BX,BY,glowR,0,Math.PI*2);cx.fill();
+  }
+  // Accretion ring (appears as BH grows)
+  if(bhGlow>0.1){
+    var t=Date.now()*0.002;
+    cx.strokeStyle='rgba(180,130,255,'+(bhGlow*0.2+0.05*Math.sin(t))+')';
+    cx.lineWidth=1+bhGlow*2;
+    cx.beginPath();cx.arc(BX,BY,bhEhr-2,0,Math.PI*2);cx.stroke();
+  }
+  // Core
+  cx.fillStyle='#050508';cx.beginPath();cx.arc(BX,BY,bhR,0,Math.PI*2);cx.fill();
+  // Inner ring (brightens with growth)
+  cx.strokeStyle='rgba(127,119,221,'+(0.3+bhGlow*0.3)+')';cx.lineWidth=1.5+bhGlow;
+  cx.beginPath();cx.arc(BX,BY,bhR+3,0,Math.PI*2);cx.stroke();
+  // Event horizon (danger zone, pulses faster as BH grows)
+  var ehrPulse=0.07+bhGlow*0.08+0.03*Math.sin(Date.now()*(0.003+bhGlow*0.005));
+  cx.strokeStyle='rgba(226,75,74,'+ehrPulse+')';cx.lineWidth=1+bhGlow;cx.setLineDash([3,3]);
+  cx.beginPath();cx.arc(BX,BY,bhEhr,0,Math.PI*2);cx.stroke();cx.setLineDash([]);
+  // Rotation ticks
+  cx.strokeStyle='rgba(255,255,255,0.03)';cx.lineWidth=0.5;
+  for(var i=0;i<12;i++){var a=i*Math.PI/6+fAngle;
+    cx.beginPath();cx.moveTo(BX+Math.cos(a)*(bhEhr+3),BY+Math.sin(a)*(bhEhr+3));
+    cx.lineTo(BX+Math.cos(a)*(bhEhr+10),BY+Math.sin(a)*(bhEhr+10));cx.stroke();}
+  // Balls
+  for(var b of balls){
+    cx.fillStyle=b.c;cx.beginPath();cx.arc(b.x,b.y,BR,0,Math.PI*2);cx.fill();
+    cx.fillStyle='rgba(255,255,255,0.15)';cx.beginPath();cx.arc(b.x-2.5,b.y-2.5,BR*0.28,0,Math.PI*2);cx.fill();}
+  // Pending match highlight: match balls = white pulse, cone targets = gold pulse
+  if(pendingMatch&&pendingMatch.phase==='highlight'){
+    var pulse=0.5+0.5*Math.sin(Date.now()*0.012);
+    var matchIds=new Set((pendingMatch.matchGrp||[]).map(function(b){return b.id;}));
+    for(var b of pendingMatch.targets){if(balls.indexOf(b)===-1)continue;
+      if(matchIds.has(b.id)){
+        cx.strokeStyle='rgba(255,255,255,'+(0.4+pulse*0.5)+')';cx.lineWidth=2.5;
+      } else {
+        cx.strokeStyle='rgba(255,200,50,'+(0.3+pulse*0.5)+')';cx.lineWidth=2;
+      }
+      cx.beginPath();cx.arc(b.x,b.y,BR+3+pulse*2,0,Math.PI*2);cx.stroke();}
+  }
+  // Suction FX
+  for(var s of suckFx){var p=1-s.t/s.mt;
+    cx.globalAlpha=p;cx.fillStyle=s.c;cx.beginPath();cx.arc(s.x,s.y,BR*(p*0.7+0.3),0,Math.PI*2);cx.fill();cx.globalAlpha=1;}
+  // Spawn FX (buddy visual effects)
+  for(var si=spawnFx.length-1;si>=0;si--){var sf=spawnFx[si];sf.t++;
+    var sp=sf.t/sf.mt;var sfa=1-sp;
+    if(sf.type==='ring'){
+      cx.strokeStyle=sf.c;cx.globalAlpha=sfa;cx.lineWidth=3*(1-sp);
+      cx.beginPath();cx.arc(sf.x,sf.y,BR+sp*30,0,Math.PI*2);cx.stroke();cx.globalAlpha=1;
+    } else if(sf.type==='line'){
+      cx.strokeStyle=sf.c;cx.globalAlpha=sfa*0.7;cx.lineWidth=2;cx.setLineDash([4,3]);
+      cx.beginPath();cx.moveTo(sf.x1,sf.y1);cx.lineTo(sf.x2,sf.y2);cx.stroke();
+      cx.setLineDash([]);cx.globalAlpha=1;
+    } else if(sf.type==='glow'){
+      var gp=0.3+0.3*Math.sin(sf.t*0.15);
+      cx.strokeStyle='rgba(255,230,100,'+(sfa*(gp+0.2))+')';cx.lineWidth=2.5;
+      cx.beginPath();cx.arc(sf.x,sf.y,BR+4+gp*3,0,Math.PI*2);cx.stroke();
+    }
+    if(sf.t>=sf.mt)spawnFx.splice(si,1);}
+  // Aim line + trajectory (only when mouse held down = aiming)
+  if(!proj&&!pendingMatch&&state==='play'&&!isRot&&aiming){
+    var dx=mx-SX,dy=my-SY,d=Math.sqrt(dx*dx+dy*dy);
+    if(d>1&&dy<-5){
+      var ax=dx/d,ay=dy/d;
+      cx.strokeStyle='rgba(255,255,255,0.3)';cx.lineWidth=1.5;
+      cx.beginPath();cx.moveTo(SX,SY);cx.lineTo(SX+ax*45,SY+ay*45);cx.stroke();
+      var tr=getTraj(SX,SY,ax*BSPD,ay*BSPD);
+      var show=Math.min(tr.length,TRAJ_LEN);
+      for(var i=0;i<show;i+=2){
+        var al=Math.max(0.05,(1-i/show)*0.35);
+        cx.fillStyle='rgba(255,255,255,'+al+')';
+        cx.beginPath();cx.arc(tr[i].x,tr[i].y,1.2,0,Math.PI*2);cx.fill();}}}
+  // Projectile
+  if(proj){
+    for(var ti=0;ti<proj.trail.length;ti++){
+      cx.fillStyle='rgba(255,255,255,'+(ti/proj.trail.length*0.25)+')';
+      cx.beginPath();cx.arc(proj.trail[ti].x,proj.trail[ti].y,1.4,0,Math.PI*2);cx.fill();}
+    var nearD=Infinity;for(var b of balls){var dd=dist(proj,b);if(dd<nearD)nearD=dd;}
+    if(nearD<BR*5){cx.strokeStyle='rgba(255,255,255,'+(1-nearD/(BR*5))*0.25+')';cx.lineWidth=1.5;
+      cx.beginPath();cx.arc(proj.x,proj.y,BR+3,0,Math.PI*2);cx.stroke();}
+    cx.fillStyle=proj.c;cx.beginPath();cx.arc(proj.x,proj.y,BR,0,Math.PI*2);cx.fill();
+    cx.fillStyle='rgba(255,255,255,0.16)';cx.beginPath();cx.arc(proj.x-2.5,proj.y-2.5,BR*0.28,0,Math.PI*2);cx.fill();}
+  // Current ball (center) with breathing glow to draw attention
+  var shipPulse=0.5+0.5*Math.sin(Date.now()*0.004);
+  // Outer glow ring
+  cx.strokeStyle='rgba(255,255,255,'+(0.12+shipPulse*0.12)+')';cx.lineWidth=2;
+  cx.beginPath();cx.arc(SX,SY,BR+6+shipPulse*2,0,Math.PI*2);cx.stroke();
+  // Color glow behind ball
+  cx.fillStyle=curCol;cx.globalAlpha=0.15+shipPulse*0.1;
+  cx.beginPath();cx.arc(SX,SY,BR+10,0,Math.PI*2);cx.fill();cx.globalAlpha=1;
+  // Ball itself (slightly larger than field balls)
+  cx.fillStyle=curCol;cx.beginPath();cx.arc(SX,SY,BR+2,0,Math.PI*2);cx.fill();
+  cx.fillStyle='rgba(255,255,255,0.22)';cx.beginPath();cx.arc(SX-3,SY-3,BR*0.32,0,Math.PI*2);cx.fill();
+  cx.strokeStyle='rgba(255,255,255,0.25)';cx.lineWidth=1;
+  cx.beginPath();cx.arc(SX,SY,BR+5,0,Math.PI*2);cx.stroke();
+  // Next ball (left side, same size, slightly dimmed)
+  var nxX=SX-BR*9,nxY=SY;
+  cx.fillStyle=nxtCol;cx.globalAlpha=0.5;
+  cx.beginPath();cx.arc(nxX,nxY,BR,0,Math.PI*2);cx.fill();
+  cx.globalAlpha=1;
+  cx.fillStyle='rgba(255,255,255,0.1)';cx.beginPath();cx.arc(nxX-2,nxY-2,BR*0.28,0,Math.PI*2);cx.fill();
+  cx.strokeStyle='rgba(255,255,255,0.1)';cx.lineWidth=1;
+  cx.beginPath();cx.arc(nxX,nxY,BR+3,0,Math.PI*2);cx.stroke();
+  // Remaining count: fixed 14px, color changes, flashes at ≤5
+  var remCol,remAlpha=1;
+  if(bLeft<=5){
+    remCol='#f85149';
+    remAlpha=0.5+0.5*Math.abs(Math.sin(Date.now()*0.006));
+  } else if(bLeft<=10){
+    remCol='#EF9F27';
+  } else if(bLeft<=15){
+    remCol='#FFE66D';
+  } else {
+    remCol='rgba(255,255,255,0.45)';
+  }
+  cx.fillStyle=remCol;cx.globalAlpha=remAlpha;
+  cx.font='bold 14px sans-serif';cx.textAlign='center';
+  cx.fillText(bLeft,nxX,nxY+BR+12);
+  cx.globalAlpha=1;
+  // Combo counter (right side of ship) - shows progress toward buddy (0/1/2 → 3 triggers)
+  if(comboCount>=1){
+    var ccX=SX+BR*7,ccY=SY;
+    var ccCol=comboCount>=2?'#EF9F27':'rgba(255,255,255,0.5)';
+    cx.fillStyle=ccCol;cx.font='bold 13px sans-serif';cx.textAlign='center';
+    cx.fillText('COMBO',ccX,ccY-2);
+    // Progress dots (3 dots, filled = progress)
+    for(var di=0;di<3;di++){
+      var dx2=ccX-8+(di*8),dy2=ccY+10;
+      cx.fillStyle=di<comboCount?ccCol:'rgba(255,255,255,0.1)';
+      cx.beginPath();cx.arc(dx2,dy2,2.5,0,Math.PI*2);cx.fill();
+    }
+  }
+  if(rwT>0){rwT--;if(rwT<=0)document.getElementById('rw').style.opacity='0';}
+}
+function loop(){updateRot();upProj();updatePending();updateSuck();bhAutoAbsorb();
+  forceValidColors();
+  draw();requestAnimationFrame(loop);}
+
+cv.addEventListener('mousedown',function(e){
+  var r=cv.getBoundingClientRect();
+  mx=(e.clientX-r.left)*(W/r.width);my=(e.clientY-r.top)*(H/r.height);
+  if(state==='play'&&!proj&&!pendingMatch&&!isRot) aiming=true;
+});
+cv.addEventListener('mousemove',function(e){var r=cv.getBoundingClientRect();
+  mx=(e.clientX-r.left)*(W/r.width);my=(e.clientY-r.top)*(H/r.height);});
+cv.addEventListener('mouseup',function(){
+  if(aiming){aiming=false;fire();}
+});
+cv.addEventListener('touchstart',function(e){e.preventDefault();var r=cv.getBoundingClientRect();var t=e.touches[0];
+  mx=(t.clientX-r.left)*(W/r.width);my=(t.clientY-r.top)*(H/r.height);
+  if(state==='play'&&!proj&&!pendingMatch&&!isRot) aiming=true;},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();var r=cv.getBoundingClientRect();var t=e.touches[0];
+  mx=(t.clientX-r.left)*(W/r.width);my=(t.clientY-r.top)*(H/r.height);},{passive:false});
+cv.addEventListener('touchend',function(e){e.preventDefault();
+  if(aiming){aiming=false;fire();}},{passive:false});
+loadLv(0);loop();
+</script></body></html>

@@ -56,3 +56,12 @@ crashlytics-build.properties
 # OS
 .DS_Store
 Thumbs.db
+
+# Tool workspaces / bookkeeping (not Unity, not source)
+.claude/
+.plastic/
+.utmp/
+
+# Unity auto-recovers scenes into this folder on crash; never a source of truth
+Assets/[_]Recovery/
+Assets/[_]Recovery.meta
